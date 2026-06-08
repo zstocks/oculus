@@ -152,6 +152,7 @@ body.selecting .check {
   padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
 }
 .lb-meta { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.lb-rename { align-self: flex-start; padding: 5px 12px; font-size: 12px; }
 .lb-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .tagchip {
   display: inline-flex; align-items: center; gap: 6px;

@@ -8,7 +8,7 @@ import { config } from './config.js';
 import './db/index.js';
 import { isAgent } from './auth.js';
 import {
-  getByHash, insertPhoto, countPhotos, searchPhotos, listUntagged, getById, getRelPath, getOriginalInfo,
+  getByHash, insertPhoto, countPhotos, searchPhotos, listUntagged, getById, getRelPath, getOriginalInfo, renamePhoto,
 } from './db/photos.js';
 import { listTags, getPhotoTags, applyTags, removeTags } from './db/tags.js';
 import { parse, QueryError } from './query/parse.js';
@@ -61,6 +61,7 @@ const server = http.createServer(async (req, res) => {
     if (path.startsWith('/api/thumb/') && isGet(method)) return handleThumb(req, res, path);
     if (path.startsWith('/api/original/') && method === 'GET') return await handleOriginal(req, res, path);
     if (path.startsWith('/api/photos/') && isGet(method)) return handleGetPhoto(req, res, path);
+    if (path.startsWith('/api/photos/') && method === 'PATCH') return await handleRenamePhoto(req, res, path);
     if (path === '/api/tags' && isGet(method)) return sendJson(req, res, 200, { tags: listTags() });
     if (path === '/api/tags/apply' && method === 'POST') return await handleTagOp(req, res, applyTags);
     if (path === '/api/tags/remove' && method === 'POST') return await handleTagOp(req, res, removeTags);
@@ -92,6 +93,21 @@ function handleGetPhoto(req, res, path) {
   const photo = getById(id);
   if (!photo) return sendJson(req, res, 404, { error: 'not_found' });
   return sendJson(req, res, 200, { photo: { ...photo, tags: getPhotoTags(id) } });
+}
+
+async function handleRenamePhoto(req, res, path) {
+  const id = Number(path.slice('/api/photos/'.length));
+  if (!Number.isInteger(id)) return sendJson(req, res, 400, { error: 'bad_request' });
+
+  let body;
+  try { body = await readJson(req, 64 * 1024); }
+  catch { return sendJson(req, res, 400, { error: 'bad_request' }); }
+
+  const name = typeof body?.original_filename === 'string' ? body.original_filename.trim() : '';
+  if (!name || name.length > 255) return sendJson(req, res, 400, { error: 'bad_request' });
+
+  if (renamePhoto(id, name) === 0) return sendJson(req, res, 404, { error: 'not_found' });
+  return sendJson(req, res, 200, { status: 'ok', original_filename: name });
 }
 
 function handleThumb(req, res, path) {

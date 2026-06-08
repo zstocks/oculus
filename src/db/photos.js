@@ -66,6 +66,12 @@ export function getById(id) {
   return getByIdStmt.get(id);
 }
 
+// Updates display metadata only; the on-disk file stays hash-named, so nothing re-syncs.
+const renameStmt = db.prepare('UPDATE photos SET original_filename = ? WHERE id = ?');
+export function renamePhoto(id, name) {
+  return renameStmt.run(name, id).changes;
+}
+
 const relPathStmt = db.prepare('SELECT rel_path FROM photos WHERE id = ?');
 export function getRelPath(id) {
   const r = relPathStmt.get(id);

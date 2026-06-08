@@ -255,6 +255,27 @@ async function detailRemoveTag(id, name) {
   await refreshDetailTags(id);
 }
 
+async function renameDetail() {
+  const p = state.photos[state.detailIndex];
+  if (!p) return;
+  const next = prompt('Rename image', p.original_filename || '');
+  if (next === null) return;                 // cancelled
+  const name = next.trim();
+  if (!name || name === p.original_filename) return;
+
+  const { ok, data } = await getJSON('/api/photos/' + p.id, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ original_filename: name }),
+  });
+  if (!ok) { setStatus('Rename failed.'); return; }
+
+  p.original_filename = data?.original_filename || name;
+  renderDetail();                            // refresh the meta line
+  const tileImg = grid().querySelector(`.tile[data-id="${p.id}"] img`);
+  if (tileImg) tileImg.alt = p.original_filename;
+}
+
 // ---- view switching ----
 function setMode(mode) {
   state.mode = mode;
@@ -319,6 +340,7 @@ function init() {
   $('selTags').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); bulkTag(false); } });
 
   $('lbClose').addEventListener('click', closeDetail);
+  $('lbRename').addEventListener('click', renameDetail);
   $('lbPrev').addEventListener('click', () => step(-1));
   $('lbNext').addEventListener('click', () => step(1));
   $('lightbox').addEventListener('click', (e) => { if (e.target === $('lightbox') || e.target.classList.contains('lb-stage')) closeDetail(); });
