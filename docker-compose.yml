@@ -1,0 +1,13 @@
+services:
+  oculus:
+    build: .
+    container_name: oculus
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3003:3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DB_PATH: /app/data/oculus.db
