@@ -25,6 +25,8 @@ mkdirSync(config.stagingDir, { recursive: true });
 
 const isGet = (m) => m === 'GET' || m === 'HEAD';
 const HASH_RE = /^[0-9a-f]{64}$/;
+// Icons must be reachable before login (login page + browsers' bare /favicon.ico probe).
+const PUBLIC_ASSETS = new Set(['/favicon.ico', '/favicon.svg', '/apple-touch-icon.png']);
 
 const server = http.createServer(async (req, res) => {
   const { method } = req;
@@ -41,6 +43,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- auth surface (open) ---
+    if (PUBLIC_ASSETS.has(path) && isGet(method) && serveStatic(req, res, path)) return;
     if (path === '/login' && isGet(method)) { serveStatic(req, res, '/login.html'); return; }
     if (path === '/login' && method === 'POST') return await handleLogin(req, res);
     if (path === '/logout' && method === 'POST') {

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect x="0" y="0" width="64" height="64" rx="13" fill="#0a0a0b"/>
+  <circle cx="32.0" cy="32.0" r="23" fill="none" stroke="#e0a84e" stroke-width="2.8"/>
+  <path d="M 40.23 36.75 L 32.00 41.50 L 23.77 36.75 L 23.77 27.25 L 32.00 22.50 L 40.23 27.25 Z" fill="none" stroke="#e0a84e" stroke-width="2.3" stroke-linejoin="round"/>
+  <line x1="40.23" y1="36.75" x2="34.26" y2="53.48" stroke="#e0a84e" stroke-width="2.3" stroke-linecap="round"/>
+  <line x1="32.00" y1="41.50" x2="14.53" y2="44.70" stroke="#e0a84e" stroke-width="2.3" stroke-linecap="round"/>
+  <line x1="23.77" y1="36.75" x2="12.27" y2="23.21" stroke="#e0a84e" stroke-width="2.3" stroke-linecap="round"/>
+  <line x1="23.77" y1="27.25" x2="29.74" y2="10.52" stroke="#e0a84e" stroke-width="2.3" stroke-linecap="round"/>
+  <line x1="32.00" y1="22.50" x2="49.47" y2="19.30" stroke="#e0a84e" stroke-width="2.3" stroke-linecap="round"/>
+  <line x1="40.23" y1="27.25" x2="51.73" y2="40.79" stroke="#e0a84e" stroke-width="2.3" stroke-linecap="round"/>
+</svg>
