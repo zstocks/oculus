@@ -20,6 +20,7 @@ const setStatus = (m) => { $('status').textContent = m || ''; };
 
 async function getJSON(url, opts) {
   const r = await fetch(url, opts);
+  if (r.status === 401) { window.location = '/login'; return { ok: false, status: 401, data: null }; }
   let data = null;
   try { data = await r.json(); } catch { /* non-JSON */ }
   return { ok: r.ok, status: r.status, data };
@@ -268,6 +269,10 @@ function init() {
   $('selectToggle').addEventListener('click', () => setSelectMode(!state.selectMode));
   $('loadMore').addEventListener('click', () => loadPhotos(false));
   $('uploadBtn').addEventListener('click', () => $('fileInput').click());
+  $('logoutBtn').addEventListener('click', async () => {
+    await fetch('/logout', { method: 'POST' });
+    window.location = '/login';
+  });
   $('fileInput').addEventListener('change', (e) => { uploadFiles(e.target.files); e.target.value = ''; });
 
   $('selApply').addEventListener('click', () => bulkTag(false));

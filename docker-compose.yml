@@ -15,3 +15,6 @@ services:
       THUMB_DIR: /app/data/thumbnails
       AGENT_TOKEN: ${AGENT_TOKEN:?set AGENT_TOKEN in oculus/.env (same value as the agent)}
       AGENT_URL: ${AGENT_URL:-http://100.85.69.38:8770}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in oculus/.env (random 32+ char string)}
+      APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in oculus/.env (your login password)}
+      SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-30}

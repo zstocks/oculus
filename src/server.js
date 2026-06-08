@@ -17,6 +17,8 @@ import { serveStatic } from './static.js';
 import { hashFile, readImageMeta, makeThumbnail, formatToMime } from './media.js';
 import { enqueueUpload } from './db/sync.js';
 import { kickSync, startSync } from './sync.js';
+import { issueToken, isLoggedIn, checkPassword, sessionCookie, clearCookie } from './session.js';
+import { tooMany, recordFail, recordSuccess } from './ratelimit.js';
 
 mkdirSync(config.thumbDir, { recursive: true });
 mkdirSync(config.stagingDir, { recursive: true });
@@ -38,7 +40,21 @@ const server = http.createServer(async (req, res) => {
       return sendJson(req, res, 404, { error: 'not_found' });
     }
 
-    // Browser API (session auth added in a later step).
+    // --- auth surface (open) ---
+    if (path === '/login' && isGet(method)) { serveStatic(req, res, '/login.html'); return; }
+    if (path === '/login' && method === 'POST') return await handleLogin(req, res);
+    if (path === '/logout' && method === 'POST') {
+      res.setHeader('Set-Cookie', clearCookie(isHttps(req)));
+      return sendJson(req, res, 200, { status: 'ok' });
+    }
+
+    // --- everything past here requires a valid session ---
+    if (!isLoggedIn(req)) {
+      if (path.startsWith('/api/')) return sendJson(req, res, 401, { error: 'unauthorized' });
+      res.writeHead(302, { Location: '/login' });
+      return res.end();
+    }
+
     if (path === '/api/photos' && isGet(method)) return handleListPhotos(req, res, url);
     if (path === '/api/photos/count' && isGet(method)) return sendJson(req, res, 200, { count: countPhotos() });
     if (path === '/api/upload' && method === 'POST') return await handleUpload(req, res);
@@ -178,6 +194,34 @@ async function handleTagOp(req, res, op) {
   const tags = Array.isArray(body?.tags) ? body.tags.map((t) => String(t).trim()).filter((t) => t.length > 0) : [];
   if (photoIds.length === 0 || tags.length === 0) return sendJson(req, res, 400, { error: 'bad_request' });
   return sendJson(req, res, 200, { changed: op(photoIds, tags) });
+}
+
+async function handleLogin(req, res) {
+  const ip = clientIp(req);
+  if (tooMany(ip)) return sendJson(req, res, 429, { error: 'too_many_attempts' });
+
+  let body;
+  try { body = await readJson(req, 4 * 1024); }
+  catch { return sendJson(req, res, 400, { error: 'bad_request' }); }
+
+  if (!checkPassword(body?.password)) {
+    recordFail(ip);
+    return sendJson(req, res, 401, { error: 'invalid_password' });
+  }
+
+  recordSuccess(ip);
+  const token = issueToken(config.sessionTtlMs);
+  res.setHeader('Set-Cookie', sessionCookie(token, config.sessionTtlMs, isHttps(req)));
+  return sendJson(req, res, 200, { status: 'ok' });
+}
+
+function clientIp(req) {
+  const fwd = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return fwd || req.socket.remoteAddress || 'unknown';
+}
+
+function isHttps(req) {
+  return req.headers['x-forwarded-proto'] === 'https';
 }
 
 async function handleIngest(req, res) {
