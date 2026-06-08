@@ -11,6 +11,7 @@ import {
 import { listTags, getPhotoTags, applyTags, removeTags } from './db/tags.js';
 import { parse, QueryError } from './query/parse.js';
 import { compile } from './query/compile.js';
+import { serveStatic } from './static.js';
 
 mkdirSync(config.thumbDir, { recursive: true });
 
@@ -24,7 +25,6 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (path === '/health' && isGet(method)) return sendJson(req, res, 200, { status: 'ok', app: 'oculus' });
-    if (path === '/' && isGet(method)) return sendJson(req, res, 200, { app: 'oculus' });
 
     // Machine-to-machine (agent <-> VPS), guarded by the shared token.
     if (path.startsWith('/api/agent/')) {
@@ -43,6 +43,8 @@ const server = http.createServer(async (req, res) => {
     if (path === '/api/tags' && isGet(method)) return sendJson(req, res, 200, { tags: listTags() });
     if (path === '/api/tags/apply' && method === 'POST') return await handleTagOp(req, res, applyTags);
     if (path === '/api/tags/remove' && method === 'POST') return await handleTagOp(req, res, removeTags);
+
+    if (isGet(method) && serveStatic(req, res, path)) return;
 
     sendJson(req, res, 404, { error: 'not_found' });
   } catch (err) {
