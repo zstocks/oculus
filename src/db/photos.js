@@ -71,3 +71,8 @@ export function getRelPath(id) {
   const r = relPathStmt.get(id);
   return r ? r.rel_path : null;
 }
+
+const origInfoStmt = db.prepare('SELECT rel_path, staged, hash, format FROM photos WHERE id = ?');
+export function getOriginalInfo(id) {
+  return origInfoStmt.get(id);
+}

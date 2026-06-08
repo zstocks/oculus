@@ -1,19 +1,24 @@
 import http from 'node:http';
-import { mkdirSync, writeFileSync, createReadStream, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, writeFileSync, createReadStream, createWriteStream, statSync } from 'node:fs';
+import { mkdir, rename, unlink } from 'node:fs/promises';
+import { join, extname } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { config } from './config.js';
 import './db/index.js';
 import { isAgent } from './auth.js';
 import {
-  getByHash, insertPhoto, countPhotos, searchPhotos, listUntagged, getById, getRelPath,
+  getByHash, insertPhoto, countPhotos, searchPhotos, listUntagged, getById, getRelPath, getOriginalInfo,
 } from './db/photos.js';
 import { listTags, getPhotoTags, applyTags, removeTags } from './db/tags.js';
 import { parse, QueryError } from './query/parse.js';
 import { compile } from './query/compile.js';
 import { serveStatic } from './static.js';
+import { hashFile, readImageMeta, makeThumbnail, formatToMime } from './media.js';
+import { enqueueUpload, kickSync, startSync } from './sync.js';
 
 mkdirSync(config.thumbDir, { recursive: true });
+mkdirSync(config.stagingDir, { recursive: true });
 
 const isGet = (m) => m === 'GET' || m === 'HEAD';
 const HASH_RE = /^[0-9a-f]{64}$/;
@@ -26,17 +31,16 @@ const server = http.createServer(async (req, res) => {
   try {
     if (path === '/health' && isGet(method)) return sendJson(req, res, 200, { status: 'ok', app: 'oculus' });
 
-    // Machine-to-machine (agent <-> VPS), guarded by the shared token.
     if (path.startsWith('/api/agent/')) {
       if (!isAgent(req)) return sendJson(req, res, 401, { error: 'unauthorized' });
       if (path === '/api/agent/ingest' && method === 'POST') return await handleIngest(req, res);
       return sendJson(req, res, 404, { error: 'not_found' });
     }
 
-    // Browser API. Session auth is added in a later step; for now these are only
-    // reachable on loopback / the tailnet (no public Nginx vhost yet).
+    // Browser API (session auth added in a later step).
     if (path === '/api/photos' && isGet(method)) return handleListPhotos(req, res, url);
     if (path === '/api/photos/count' && isGet(method)) return sendJson(req, res, 200, { count: countPhotos() });
+    if (path === '/api/upload' && method === 'POST') return await handleUpload(req, res);
     if (path.startsWith('/api/thumb/') && isGet(method)) return handleThumb(req, res, path);
     if (path.startsWith('/api/original/') && method === 'GET') return await handleOriginal(req, res, path);
     if (path.startsWith('/api/photos/') && isGet(method)) return handleGetPhoto(req, res, path);
@@ -73,7 +77,6 @@ function handleGetPhoto(req, res, path) {
   return sendJson(req, res, 200, { photo: { ...photo, tags: getPhotoTags(id) } });
 }
 
-// Serve a thumbnail from the local cache (hash-addressed, immutable).
 function handleThumb(req, res, path) {
   const hash = path.slice('/api/thumb/'.length).replace(/\.webp$/, '');
   if (!HASH_RE.test(hash)) return sendJson(req, res, 400, { error: 'bad_request' });
@@ -81,29 +84,38 @@ function handleThumb(req, res, path) {
   let st;
   try { st = statSync(file); } catch { return sendJson(req, res, 404, { error: 'not_found' }); }
   res.writeHead(200, {
-    'Content-Type': 'image/webp',
-    'Content-Length': st.size,
+    'Content-Type': 'image/webp', 'Content-Length': st.size,
     'Cache-Control': 'public, max-age=31536000, immutable',
   });
   if (req.method === 'HEAD') return res.end();
   createReadStream(file).pipe(res);
 }
 
-// Proxy a full-resolution original from the agent over Tailscale.
 async function handleOriginal(req, res, path) {
   const id = Number(path.slice('/api/original/'.length));
   if (!Number.isInteger(id)) return sendJson(req, res, 400, { error: 'bad_request' });
-  const rel = getRelPath(id);
-  if (!rel) return sendJson(req, res, 404, { error: 'not_found' });
+  const info = getOriginalInfo(id);
+  if (!info) return sendJson(req, res, 404, { error: 'not_found' });
 
+  // Not yet synced to the Maingear -> serve the staged original from the VPS.
+  if (info.staged) {
+    const file = join(config.stagingDir, info.hash);
+    let st;
+    try { st = statSync(file); } catch { return sendJson(req, res, 404, { error: 'not_found' }); }
+    res.writeHead(200, { 'Content-Type': formatToMime(info.format), 'Content-Length': st.size });
+    createReadStream(file).pipe(res);
+    return;
+  }
+
+  if (!info.rel_path) return sendJson(req, res, 404, { error: 'not_found' });
   let agentRes;
   try {
     agentRes = await fetch(
-      config.agentUrl.replace(/\/$/, '') + '/original?rel=' + encodeURIComponent(rel),
+      config.agentUrl.replace(/\/$/, '') + '/original?rel=' + encodeURIComponent(info.rel_path),
       { headers: { Authorization: `Bearer ${config.agentToken}` } },
     );
   } catch {
-    return sendJson(req, res, 503, { error: 'agent_unreachable' }); // Maingear offline
+    return sendJson(req, res, 503, { error: 'agent_unreachable' });
   }
   if (!agentRes.ok) return sendJson(req, res, agentRes.status, { error: 'agent_error' });
 
@@ -114,12 +126,55 @@ async function handleOriginal(req, res, path) {
   Readable.fromWeb(agentRes.body).pipe(res);
 }
 
+async function handleUpload(req, res) {
+  const filename = req.headers['x-filename'] ? decodeURIComponent(req.headers['x-filename']) : 'upload';
+  const tmp = join(config.stagingDir, 'tmp-' + randomUUID());
+
+  try {
+    await streamToFile(req, tmp, 200 * 1024 * 1024);
+  } catch {
+    await unlink(tmp).catch(() => {});
+    return sendJson(req, res, 413, { error: 'too_large' });
+  }
+
+  const hash = await hashFile(tmp);
+  if (getByHash(hash)) {
+    await unlink(tmp).catch(() => {});
+    return sendJson(req, res, 200, { status: 'duplicate' });
+  }
+
+  let meta;
+  try { meta = await readImageMeta(tmp); }
+  catch { await unlink(tmp).catch(() => {}); return sendJson(req, res, 400, { error: 'unsupported_image' }); }
+
+  const ext = (extname(filename) || '.jpg').toLowerCase();
+  const d = meta.taken_at ? new Date(meta.taken_at) : new Date();
+  const yyyy = String(d.getFullYear());
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const relPath = `${yyyy}/${mm}/${hash}${ext}`;
+
+  writeFileSync(join(config.thumbDir, `${hash}.webp`), await makeThumbnail(tmp, 400));
+
+  const staged = join(config.stagingDir, hash);
+  await rename(tmp, staged);
+
+  const info = insertPhoto({
+    hash, rel_path: relPath, original_filename: filename, kind: 'image',
+    format: meta.format, width: meta.width, height: meta.height, file_size: statSync(staged).size,
+    duration: null, taken_at: meta.taken_at, camera_make: meta.camera_make, camera_model: meta.camera_model,
+    gps_lat: meta.gps_lat, gps_lon: meta.gps_lon, sync_status: 'pending', staged: 1,
+  });
+  const id = Number(info.lastInsertRowid);
+  enqueueUpload(id);
+  kickSync(); // try to push immediately if the agent is online
+
+  return sendJson(req, res, 201, { status: 'created', id });
+}
+
 async function handleTagOp(req, res, op) {
   const body = await readJson(req, 1024 * 1024);
   const photoIds = Array.isArray(body?.photo_ids) ? body.photo_ids.filter(Number.isInteger) : [];
-  const tags = Array.isArray(body?.tags)
-    ? body.tags.map((t) => String(t).trim()).filter((t) => t.length > 0)
-    : [];
+  const tags = Array.isArray(body?.tags) ? body.tags.map((t) => String(t).trim()).filter((t) => t.length > 0) : [];
   if (photoIds.length === 0 || tags.length === 0) return sendJson(req, res, 400, { error: 'bad_request' });
   return sendJson(req, res, 200, { changed: op(photoIds, tags) });
 }
@@ -134,6 +189,18 @@ async function handleIngest(req, res) {
   writeFileSync(join(config.thumbDir, `${photo.hash}.webp`), Buffer.from(thumbB64, 'base64'));
   insertPhoto({ ...photo, sync_status: 'synced', staged: 0 });
   return sendJson(req, res, 201, { status: 'created' });
+}
+
+function streamToFile(req, path, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const ws = createWriteStream(path);
+    req.on('data', (c) => { size += c.length; if (size > limit) { req.destroy(); ws.destroy(); reject(new Error('too_large')); } });
+    req.on('error', reject);
+    ws.on('error', reject);
+    ws.on('finish', resolve);
+    req.pipe(ws);
+  });
 }
 
 function clampInt(value, def, min, max) {
@@ -160,4 +227,5 @@ function sendJson(req, res, status, body) {
 server.listen(config.port, () => {
   console.log(`[oculus] listening on :${config.port}`);
   console.log(`[oculus] thumbnails: ${config.thumbDir}`);
+  startSync();
 });

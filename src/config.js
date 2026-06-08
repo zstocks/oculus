@@ -15,8 +15,10 @@ export const config = {
   port: Number(process.env.PORT) || 3000,
   dataDir: DATA_DIR,
   thumbDir: process.env.THUMB_DIR || join(DATA_DIR, 'thumbnails'),
+  stagingDir: process.env.STAGING_DIR || join(DATA_DIR, 'staging'),
   agentToken: required('AGENT_TOKEN'),
-  agentUrl: required('AGENT_URL'), // e.g. http://100.85.69.38:8770 (Maingear over Tailscale)
+  agentUrl: required('AGENT_URL'),
+  syncIntervalMs: Number(process.env.SYNC_INTERVAL_MS) || 15000,
 };
 
 if (config.agentToken.length < 16) {

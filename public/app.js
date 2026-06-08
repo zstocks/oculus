@@ -231,6 +231,31 @@ function setSelectMode(on) {
   if (!on) clearSelection(); else updateSelbar();
 }
 
+// ---- upload ----
+async function uploadFiles(files) {
+  const list = [...files];
+  if (!list.length) return;
+  let ok = 0, dup = 0, fail = 0;
+  for (let i = 0; i < list.length; i++) {
+    setStatus(`Uploading ${i + 1} of ${list.length}\u2026`);
+    try {
+      const r = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'X-Filename': encodeURIComponent(list[i].name) },
+        body: list[i],
+      });
+      if (r.status === 201) ok++;
+      else if (r.status === 200) { dup++; ok++; }
+      else fail++;
+    } catch { fail++; }
+  }
+  setStatus(`Uploaded ${ok}` + (dup ? ` (${dup} already in library)` : '') + (fail ? `, ${fail} failed` : '') + '.');
+  await loadTags();
+  state.query = '';
+  document.getElementById('searchInput').value = '';
+  setMode('all'); // uploads sort to the top of the timeline
+}
+
 // ---- init ----
 function init() {
   $('searchForm').addEventListener('submit', (e) => {
@@ -242,6 +267,8 @@ function init() {
   $('viewUntagged').addEventListener('click', () => setMode('untagged'));
   $('selectToggle').addEventListener('click', () => setSelectMode(!state.selectMode));
   $('loadMore').addEventListener('click', () => loadPhotos(false));
+  $('uploadBtn').addEventListener('click', () => $('fileInput').click());
+  $('fileInput').addEventListener('change', (e) => { uploadFiles(e.target.files); e.target.value = ''; });
 
   $('selApply').addEventListener('click', () => bulkTag(false));
   $('selRemove').addEventListener('click', () => bulkTag(true));
