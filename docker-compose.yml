@@ -14,3 +14,4 @@ services:
       DB_PATH: /app/data/oculus.db
       THUMB_DIR: /app/data/thumbnails
       AGENT_TOKEN: ${AGENT_TOKEN:?set AGENT_TOKEN in oculus/.env (same value as the agent)}
+      AGENT_URL: ${AGENT_URL:-http://100.85.69.38:8770}

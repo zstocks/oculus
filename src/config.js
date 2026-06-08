@@ -16,9 +16,9 @@ export const config = {
   dataDir: DATA_DIR,
   thumbDir: process.env.THUMB_DIR || join(DATA_DIR, 'thumbnails'),
   agentToken: required('AGENT_TOKEN'),
+  agentUrl: required('AGENT_URL'), // e.g. http://100.85.69.38:8770 (Maingear over Tailscale)
 };
 
-// Same shared secret as the agent; refuse to start on a weak/empty value.
 if (config.agentToken.length < 16) {
   console.error('[oculus] AGENT_TOKEN must be at least 16 characters');
   process.exit(1);

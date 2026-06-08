@@ -65,3 +65,9 @@ const getByIdStmt = db.prepare(`SELECT ${SELECT_COLS} FROM photos p WHERE p.id =
 export function getById(id) {
   return getByIdStmt.get(id);
 }
+
+const relPathStmt = db.prepare('SELECT rel_path FROM photos WHERE id = ?');
+export function getRelPath(id) {
+  const r = relPathStmt.get(id);
+  return r ? r.rel_path : null;
+}
