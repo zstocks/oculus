@@ -162,3 +162,12 @@ body.selecting .check {
 .tagchip .x:hover { color: var(--accent); }
 .lb-addtag { background: var(--bg-2); color: var(--fg); border: 1px solid var(--line); border-radius: var(--radius); padding: 9px 12px; font-size: 14px; max-width: 360px; }
 .lb-addtag:focus { outline: none; border-color: var(--accent-dim); }
+.lb-suggest { display: flex; flex-wrap: wrap; gap: 6px; max-width: 360px; }
+.suggest {
+  background: var(--bg-2); color: var(--muted);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 5px 12px; font-size: 13px; cursor: pointer;
+  touch-action: manipulation;
+}
+.suggest:hover { color: var(--fg); border-color: var(--accent-dim); }
+.suggest:active { color: var(--accent); }

@@ -12,6 +12,7 @@ const state = {
   selectMode: false,
   selected: new Set(),
   detailIndex: -1,
+  detailTags: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -176,6 +177,7 @@ async function renderDetail() {
 }
 
 function renderDetailTags(id, tags) {
+  state.detailTags = tags;
   const box = $('lbTags');
   box.innerHTML = '';
   for (const name of tags) {
@@ -189,6 +191,42 @@ function renderDetailTags(id, tags) {
     chip.append(label, x);
     box.appendChild(chip);
   }
+  renderSuggest();
+}
+
+// Tappable suggestions: tags not yet on this photo, filtered by what's typed.
+// Acting on pointerdown + preventDefault keeps the input focused, so the
+// mobile keyboard stays open and the tag registers in one tap.
+function renderSuggest() {
+  const box = $('lbSuggest');
+  if (!box) return;
+  box.innerHTML = '';
+  const p = state.photos[state.detailIndex];
+  if (!p) return;
+  const typed = $('lbAddTag').value.trim().toLowerCase();
+  const applied = new Set((state.detailTags || []).map((t) => t.toLowerCase()));
+  const matches = state.tags
+    .filter((name) => !applied.has(name.toLowerCase()))
+    .filter((name) => !typed || name.toLowerCase().includes(typed))
+    .slice(0, 12);
+  for (const name of matches) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'suggest';
+    b.textContent = name;
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); addSingleTag(p.id, name); });
+    box.appendChild(b);
+  }
+}
+
+async function addSingleTag(id, name) {
+  await getJSON('/api/tags/apply', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ photo_ids: [id], tags: [name] }),
+  });
+  $('lbAddTag').value = '';
+  await loadTags();
+  await refreshDetailTags(id);
 }
 
 async function refreshDetailTags(id) {
@@ -287,6 +325,7 @@ function init() {
   $('lbAddTag').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); detailAddTags(state.photos[state.detailIndex].id); }
   });
+  $('lbAddTag').addEventListener('input', renderSuggest);
   document.addEventListener('keydown', (e) => {
     if ($('lightbox').hidden) return;
     if (e.key === 'Escape') closeDetail();
