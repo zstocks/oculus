@@ -134,8 +134,16 @@ body.selecting .check {
   animation: fade .15s ease;
 }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
-.lb-stage { flex: 1; display: grid; place-items: center; min-height: 0; padding: 16px; position: relative; }
-.lb-stage img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.lb-stage { flex: 1; min-height: 0; position: relative; }
+/* Absolutely positioned so the percentage max-height resolves against the stage:
+   a grid/flex child's % height does NOT resolve when the parent height comes from
+   flex-grow, which let tall portrait images overflow the panel. */
+.lb-stage img {
+  position: absolute; inset: 0; margin: auto;
+  width: auto; height: auto;
+  max-width: calc(100% - 32px); max-height: calc(100% - 32px);
+  object-fit: contain;
+}
 .lb-offline { position: absolute; bottom: 16px; color: var(--accent); font-family: var(--mono); font-size: 13px; background: rgba(0,0,0,.6); padding: 6px 12px; border-radius: var(--radius); }
 
 .lb-close, .lb-nav {
