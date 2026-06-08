@@ -15,7 +15,8 @@ import { parse, QueryError } from './query/parse.js';
 import { compile } from './query/compile.js';
 import { serveStatic } from './static.js';
 import { hashFile, readImageMeta, makeThumbnail, formatToMime } from './media.js';
-import { enqueueUpload, kickSync, startSync } from './sync.js';
+import { enqueueUpload } from './db/sync.js';
+import { kickSync, startSync } from './sync.js';
 
 mkdirSync(config.thumbDir, { recursive: true });
 mkdirSync(config.stagingDir, { recursive: true });
