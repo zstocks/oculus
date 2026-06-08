@@ -1,6 +1,15 @@
 # /etc/nginx/sites-available/oculus
-# symlink into sites-enabled, then: sudo nginx -t && sudo systemctl reload nginx
-# (Reconcile listen/http2 syntax with your existing server blocks if they differ.)
+# Deploy:
+#   sudo cp ~/apps/oculus/nginx.conf.template /etc/nginx/sites-available/oculus
+#   sudo ln -s /etc/nginx/sites-available/oculus /etc/nginx/sites-enabled/oculus
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# Uses the existing wildcard cert for *.zacharystocks.com — no new certbot run,
+# no new DNS record (wildcard A record already resolves this subdomain).
+#
+# NOTE: if your other vhosts (e.g. dashboard) set ssl_certificate inside the
+# server block rather than in snippets/ssl.conf, uncomment the two lines below
+# to match. If snippets/ssl.conf already carries the wildcard cert, leave them off.
 
 server {
     listen 80;
@@ -14,18 +23,30 @@ server {
 
     include snippets/ssl.conf;
     include snippets/security-headers.conf;
+    # ssl_certificate     /etc/letsencrypt/live/zacharystocks.com-0001/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/zacharystocks.com-0001/privkey.pem;
 
-    # Photo/video uploads need a larger body than the 1m default.
+    # Uploads need more than the 1m default. The app itself caps uploads at
+    # 200MB and returns 413 past that; this is just the outer ceiling.
     client_max_body_size 512m;
 
-    location / {
-        limit_req zone=general burst=20 nodelay;
+    # Inherited by both locations below (a location with no proxy_set_header
+    # of its own inherits all of these from the server block).
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;   # flips the session cookie to Secure
 
+    # Brute-force protection on the only unauthenticated endpoint. Everything
+    # else is auth-gated and serves bursty thumbnail requests, so a site-wide
+    # limit would throttle normal browsing.
+    location = /login {
+        limit_req zone=general burst=5 nodelay;
         proxy_pass http://127.0.0.1:3003;
-        proxy_http_version 1.1;
-        proxy_set_header Host              $host;
-        proxy_set_header X-Real-IP         $remote_addr;
-        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3003;
     }
 }
