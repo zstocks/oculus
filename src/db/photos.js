@@ -41,3 +41,27 @@ export function insertPhoto(p) {
 export function countPhotos() {
   return count.get().n;
 }
+
+// --- listing / search ---
+
+const SELECT_COLS =
+  'p.id, p.hash, p.original_filename, p.kind, p.format, p.width, p.height, p.taken_at, p.imported_at';
+const ORDER = 'ORDER BY COALESCE(p.taken_at, p.imported_at) DESC, p.id DESC';
+
+// `where` + `params` come from the query engine (compile()). Empty query -> '1 = 1'.
+export function searchPhotos(where, params, limit = 100, offset = 0) {
+  const sql = `SELECT ${SELECT_COLS} FROM photos p WHERE ${where} ${ORDER} LIMIT ? OFFSET ?`;
+  return db.prepare(sql).all(...params, limit, offset);
+}
+
+export function listUntagged(limit = 100, offset = 0) {
+  const sql = `SELECT ${SELECT_COLS} FROM photos p
+    WHERE NOT EXISTS (SELECT 1 FROM photo_tags pt WHERE pt.photo_id = p.id)
+    ${ORDER} LIMIT ? OFFSET ?`;
+  return db.prepare(sql).all(limit, offset);
+}
+
+const getByIdStmt = db.prepare(`SELECT ${SELECT_COLS} FROM photos p WHERE p.id = ?`);
+export function getById(id) {
+  return getByIdStmt.get(id);
+}
