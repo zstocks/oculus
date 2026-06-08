@@ -276,6 +276,20 @@ async function renameDetail() {
   if (tileImg) tileImg.alt = p.original_filename;
 }
 
+// Native browser download: the server sets Content-Disposition: attachment, so this
+// streams to the device's downloads without navigating away. The server pulls the
+// original from the Maingear, serves it, then deletes its temp copy on the VPS.
+function downloadDetail() {
+  const p = state.photos[state.detailIndex];
+  if (!p) return;
+  const a = document.createElement('a');
+  a.href = '/api/download/' + p.id;
+  a.download = p.original_filename || '';   // hint; server's filename takes precedence
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 // ---- view switching ----
 function setMode(mode) {
   state.mode = mode;
@@ -341,6 +355,7 @@ function init() {
 
   $('lbClose').addEventListener('click', closeDetail);
   $('lbRename').addEventListener('click', renameDetail);
+  $('lbDownload').addEventListener('click', downloadDetail);
   $('lbPrev').addEventListener('click', () => step(-1));
   $('lbNext').addEventListener('click', () => step(1));
   $('lightbox').addEventListener('click', (e) => { if (e.target === $('lightbox') || e.target.classList.contains('lb-stage')) closeDetail(); });

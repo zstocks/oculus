@@ -4,6 +4,7 @@ import { mkdir, rename, unlink } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { config } from './config.js';
 import './db/index.js';
 import { isAgent } from './auth.js';
@@ -63,6 +64,7 @@ const server = http.createServer(async (req, res) => {
     if (path === '/api/upload' && method === 'POST') return await handleUpload(req, res);
     if (path.startsWith('/api/thumb/') && isGet(method)) return handleThumb(req, res, path);
     if (path.startsWith('/api/original/') && method === 'GET') return await handleOriginal(req, res, path);
+    if (path.startsWith('/api/download/') && method === 'GET') return await handleDownload(req, res, path);
     if (path.startsWith('/api/photos/') && isGet(method)) return handleGetPhoto(req, res, path);
     if (path.startsWith('/api/photos/') && method === 'PATCH') return await handleRenamePhoto(req, res, path);
     if (path === '/api/tags' && isGet(method)) return sendJson(req, res, 200, { tags: listTags() });
@@ -160,6 +162,82 @@ async function handleOriginal(req, res, path) {
   if (len) headers['Content-Length'] = len;
   res.writeHead(200, headers);
   Readable.fromWeb(agentRes.body).pipe(res);
+}
+
+// Download the original to the requesting device. Originals on the Maingear are pulled
+// to a VPS temp file, served, then deleted; originals still staged on the VPS are served
+// in place (deleting them would drop the only copy before it syncs).
+async function handleDownload(req, res, path) {
+  const id = Number(path.slice('/api/download/'.length));
+  if (!Number.isInteger(id)) return sendJson(req, res, 400, { error: 'bad_request' });
+  const info = getOriginalInfo(id);
+  if (!info) return sendJson(req, res, 404, { error: 'not_found' });
+
+  const headers = downloadHeaders(formatToMime(info.format), downloadName(info));
+
+  if (info.staged) {
+    const file = join(config.stagingDir, info.hash);
+    let st;
+    try { st = statSync(file); } catch { return sendJson(req, res, 404, { error: 'not_found' }); }
+    res.writeHead(200, { ...headers, 'Content-Length': st.size });
+    createReadStream(file).pipe(res);
+    return;
+  }
+
+  if (!info.rel_path) return sendJson(req, res, 404, { error: 'not_found' });
+
+  const tmp = join(config.stagingDir, 'dl-' + randomUUID());
+  try {
+    await pullFromAgent(info.rel_path, tmp);
+  } catch (e) {
+    await unlink(tmp).catch(() => {});
+    const code = e.message === 'agent_unreachable' ? 503 : 502;
+    return sendJson(req, res, code, { error: e.message });
+  }
+
+  let st;
+  try { st = statSync(tmp); }
+  catch { await unlink(tmp).catch(() => {}); return sendJson(req, res, 500, { error: 'server_error' }); }
+
+  res.writeHead(200, { ...headers, 'Content-Length': st.size });
+  const stream = createReadStream(tmp);
+  let cleaned = false;
+  const cleanup = () => { if (cleaned) return; cleaned = true; unlink(tmp).catch(() => {}); };
+  res.on('finish', cleanup);                       // sent in full
+  res.on('close', () => { stream.destroy(); cleanup(); }); // client disconnected (or after finish)
+  stream.on('error', () => { res.destroy(); cleanup(); });
+  stream.pipe(res);
+}
+
+async function pullFromAgent(relPath, destPath) {
+  let agentRes;
+  try {
+    agentRes = await fetch(
+      config.agentUrl.replace(/\/$/, '') + '/original?rel=' + encodeURIComponent(relPath),
+      { headers: { Authorization: `Bearer ${config.agentToken}` } },
+    );
+  } catch {
+    throw new Error('agent_unreachable');
+  }
+  if (!agentRes.ok) throw new Error('agent_error');
+  await pipeline(Readable.fromWeb(agentRes.body), createWriteStream(destPath));
+}
+
+function downloadName(info) {
+  const base = (info.original_filename || '').trim().replace(/[/\\]/g, '_');
+  if (base) return base;
+  const ext = info.format ? '.' + info.format : '';
+  return info.hash.slice(0, 16) + ext;
+}
+
+function downloadHeaders(mime, filename) {
+  const ascii = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  const encoded = encodeURIComponent(filename);
+  return {
+    'Content-Type': mime,
+    'Content-Disposition': `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`,
+    'Cache-Control': 'no-store',
+  };
 }
 
 async function handleUpload(req, res) {
