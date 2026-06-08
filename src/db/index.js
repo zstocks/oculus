@@ -45,7 +45,10 @@ function runMigrations() {
   }
 }
 
+// Run on module load so any importer (e.g. the data layer) gets a migrated db
+// before it prepares statements.
+runMigrations();
+
 export function initDb() {
-  runMigrations();
   return db;
 }
