@@ -137,9 +137,9 @@ async function bulkTag(remove) {
 function openDetail(index) {
   if (index < 0 || index >= state.photos.length) return;
   state.detailIndex = index;
-  renderDetail();
-  $('lightbox').hidden = false;
+  $('lightbox').hidden = false;          // show first, then load into the visible container
   document.body.classList.add('modal-open');
+  renderDetail();
 }
 
 function closeDetail() {
