@@ -3,18 +3,30 @@ services:
     build: .
     container_name: oculus
     restart: unless-stopped
+    user: "1000:1000"                  # run as the node user (non-root)
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 768m
     ports:
-      - "127.0.0.1:3003:3000"          # Nginx -> app (browser UI, added in a later step)
-      - "100.74.254.83:3003:3000"      # agent -> app (ingest over Tailscale, private interface)
+      - "127.0.0.1:3003:3000"          # Nginx -> app (browser UI)
     volumes:
       - ./data:/app/data
+      - type: bind
+        source: /mnt/box/oculus/library
+        target: /app/originals
+        bind: { propagation: rslave }  # track SSHFS reconnects on the host
+      - type: bind
+        source: /mnt/box/oculus/incoming
+        target: /app/incoming
+        bind: { propagation: rslave }
     environment:
       NODE_ENV: production
       PORT: "3000"
       DB_PATH: /app/data/oculus.db
       THUMB_DIR: /app/data/thumbnails
-      AGENT_TOKEN: ${AGENT_TOKEN:?set AGENT_TOKEN in oculus/.env (same value as the agent)}
-      AGENT_URL: ${AGENT_URL:-http://100.85.69.38:8770}
+      ORIGINALS_DIR: /app/originals
+      INCOMING_DIR: /app/incoming
+      SCAN_INTERVAL_MS: ${SCAN_INTERVAL_MS:-30000}
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in oculus/.env (random 32+ char string)}
       APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in oculus/.env (your login password)}
       SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-30}

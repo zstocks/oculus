@@ -1,28 +1,25 @@
 import http from 'node:http';
-import { mkdirSync, writeFileSync, createReadStream, createWriteStream, statSync } from 'node:fs';
-import { mkdir, rename, unlink } from 'node:fs/promises';
-import { join, extname } from 'node:path';
+import { mkdirSync, createReadStream, createWriteStream, statSync } from 'node:fs';
+import { unlink } from 'node:fs/promises';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import { config } from './config.js';
 import './db/index.js';
-import { isAgent } from './auth.js';
 import {
-  getByHash, insertPhoto, countPhotos, searchPhotos, listUntagged, getById, getRelPath, getOriginalInfo, renamePhoto,
+  countPhotos, searchPhotos, listUntagged, getById, getOriginalInfo, renamePhoto,
 } from './db/photos.js';
 import { listTags, getPhotoTags, applyTags, removeTags } from './db/tags.js';
 import { parse, QueryError } from './query/parse.js';
 import { compile } from './query/compile.js';
 import { serveStatic } from './static.js';
-import { hashFile, readImageMeta, makeThumbnail, formatToMime } from './media.js';
-import { enqueueUpload } from './db/sync.js';
-import { kickSync, startSync } from './sync.js';
+import { formatToMime } from './media.js';
+import { ingestFile } from './ingest.js';
+import { startScanner } from './scanner.js';
 import { issueToken, isLoggedIn, checkPassword, sessionCookie, clearCookie } from './session.js';
 import { tooMany, recordFail, recordSuccess } from './ratelimit.js';
 
 mkdirSync(config.thumbDir, { recursive: true });
-mkdirSync(config.stagingDir, { recursive: true });
+mkdirSync(config.tmpDir, { recursive: true });
 
 const isGet = (m) => m === 'GET' || m === 'HEAD';
 const HASH_RE = /^[0-9a-f]{64}$/;
@@ -36,12 +33,6 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (path === '/health' && isGet(method)) return sendJson(req, res, 200, { status: 'ok', app: 'oculus' });
-
-    if (path.startsWith('/api/agent/')) {
-      if (!isAgent(req)) return sendJson(req, res, 401, { error: 'unauthorized' });
-      if (path === '/api/agent/ingest' && method === 'POST') return await handleIngest(req, res);
-      return sendJson(req, res, 404, { error: 'not_found' });
-    }
 
     // --- auth surface (open) ---
     if (PUBLIC_ASSETS.has(path) && isGet(method) && serveStatic(req, res, path)) return;
@@ -129,98 +120,42 @@ function handleThumb(req, res, path) {
   createReadStream(file).pipe(res);
 }
 
+// Stream the original straight from the box mount. Mount down -> the read errors -> 503;
+// row exists but file is missing -> 404. Keeps the :id validation guard above.
 async function handleOriginal(req, res, path) {
   const id = Number(path.slice('/api/original/'.length));
   if (!Number.isInteger(id)) return sendJson(req, res, 400, { error: 'bad_request' });
   const info = getOriginalInfo(id);
-  if (!info) return sendJson(req, res, 404, { error: 'not_found' });
+  if (!info || !info.rel_path) return sendJson(req, res, 404, { error: 'not_found' });
 
-  // Not yet synced to the Maingear -> serve the staged original from the VPS.
-  if (info.staged) {
-    const file = join(config.stagingDir, info.hash);
-    let st;
-    try { st = statSync(file); } catch { return sendJson(req, res, 404, { error: 'not_found' }); }
-    res.writeHead(200, { 'Content-Type': formatToMime(info.format), 'Content-Length': st.size });
-    createReadStream(file).pipe(res);
-    return;
-  }
-
-  if (!info.rel_path) return sendJson(req, res, 404, { error: 'not_found' });
-  let agentRes;
-  try {
-    agentRes = await fetch(
-      config.agentUrl.replace(/\/$/, '') + '/original?rel=' + encodeURIComponent(info.rel_path),
-      { headers: { Authorization: `Bearer ${config.agentToken}` } },
-    );
-  } catch {
-    return sendJson(req, res, 503, { error: 'agent_unreachable' });
-  }
-  if (!agentRes.ok) return sendJson(req, res, agentRes.status, { error: 'agent_error' });
-
-  const headers = { 'Content-Type': agentRes.headers.get('content-type') || 'application/octet-stream' };
-  const len = agentRes.headers.get('content-length');
-  if (len) headers['Content-Length'] = len;
-  res.writeHead(200, headers);
-  Readable.fromWeb(agentRes.body).pipe(res);
+  streamFromMount(req, res, info.rel_path, { 'Content-Type': formatToMime(info.format) });
 }
 
-// Download the original to the requesting device. Originals on the Maingear are pulled
-// to a VPS temp file, served, then deleted; originals still staged on the VPS are served
-// in place (deleting them would drop the only copy before it syncs).
+// Download the original to the requesting device — same mount read, attachment headers.
 async function handleDownload(req, res, path) {
   const id = Number(path.slice('/api/download/'.length));
   if (!Number.isInteger(id)) return sendJson(req, res, 400, { error: 'bad_request' });
   const info = getOriginalInfo(id);
-  if (!info) return sendJson(req, res, 404, { error: 'not_found' });
+  if (!info || !info.rel_path) return sendJson(req, res, 404, { error: 'not_found' });
 
-  const headers = downloadHeaders(formatToMime(info.format), downloadName(info));
-
-  if (info.staged) {
-    const file = join(config.stagingDir, info.hash);
-    let st;
-    try { st = statSync(file); } catch { return sendJson(req, res, 404, { error: 'not_found' }); }
-    res.writeHead(200, { ...headers, 'Content-Length': st.size });
-    createReadStream(file).pipe(res);
-    return;
-  }
-
-  if (!info.rel_path) return sendJson(req, res, 404, { error: 'not_found' });
-
-  const tmp = join(config.stagingDir, 'dl-' + randomUUID());
-  try {
-    await pullFromAgent(info.rel_path, tmp);
-  } catch (e) {
-    await unlink(tmp).catch(() => {});
-    const code = e.message === 'agent_unreachable' ? 503 : 502;
-    return sendJson(req, res, code, { error: e.message });
-  }
-
-  let st;
-  try { st = statSync(tmp); }
-  catch { await unlink(tmp).catch(() => {}); return sendJson(req, res, 500, { error: 'server_error' }); }
-
-  res.writeHead(200, { ...headers, 'Content-Length': st.size });
-  const stream = createReadStream(tmp);
-  let cleaned = false;
-  const cleanup = () => { if (cleaned) return; cleaned = true; unlink(tmp).catch(() => {}); };
-  res.on('finish', cleanup);                       // sent in full
-  res.on('close', () => { stream.destroy(); cleanup(); }); // client disconnected (or after finish)
-  stream.on('error', () => { res.destroy(); cleanup(); });
-  stream.pipe(res);
+  streamFromMount(req, res, info.rel_path, downloadHeaders(formatToMime(info.format), downloadName(info)));
 }
 
-async function pullFromAgent(relPath, destPath) {
-  let agentRes;
+function streamFromMount(req, res, relPath, headers) {
+  const file = join(config.originalsDir, relPath);
+  let st;
   try {
-    agentRes = await fetch(
-      config.agentUrl.replace(/\/$/, '') + '/original?rel=' + encodeURIComponent(relPath),
-      { headers: { Authorization: `Bearer ${config.agentToken}` } },
-    );
-  } catch {
-    throw new Error('agent_unreachable');
+    st = statSync(file);
+  } catch (err) {
+    // ENOENT -> the row outlived its file; anything else (mount down) -> unavailable.
+    if (err.code === 'ENOENT') return sendJson(req, res, 404, { error: 'not_found' });
+    return sendJson(req, res, 503, { error: 'storage_unavailable' });
   }
-  if (!agentRes.ok) throw new Error('agent_error');
-  await pipeline(Readable.fromWeb(agentRes.body), createWriteStream(destPath));
+  res.writeHead(200, { ...headers, 'Content-Length': st.size });
+  if (req.method === 'HEAD') return res.end();
+  const stream = createReadStream(file);
+  stream.on('error', () => res.destroy());
+  stream.pipe(res);
 }
 
 function downloadName(info) {
@@ -242,7 +177,7 @@ function downloadHeaders(mime, filename) {
 
 async function handleUpload(req, res) {
   const filename = req.headers['x-filename'] ? decodeURIComponent(req.headers['x-filename']) : 'upload';
-  const tmp = join(config.stagingDir, 'tmp-' + randomUUID());
+  const tmp = join(config.tmpDir, 'up-' + randomUUID());
 
   try {
     await streamToFile(req, tmp, 200 * 1024 * 1024);
@@ -251,38 +186,18 @@ async function handleUpload(req, res) {
     return sendJson(req, res, 413, { error: 'too_large' });
   }
 
-  const hash = await hashFile(tmp);
-  if (getByHash(hash)) {
+  let result;
+  try {
+    result = await ingestFile(tmp, filename); // consumes tmp on every outcome
+  } catch (err) {
     await unlink(tmp).catch(() => {});
-    return sendJson(req, res, 200, { status: 'duplicate' });
+    console.error('[oculus] ingest failed:', err);
+    return sendJson(req, res, 500, { error: 'server_error' });
   }
 
-  let meta;
-  try { meta = await readImageMeta(tmp); }
-  catch { await unlink(tmp).catch(() => {}); return sendJson(req, res, 400, { error: 'unsupported_image' }); }
-
-  const ext = (extname(filename) || '.jpg').toLowerCase();
-  const d = meta.taken_at ? new Date(meta.taken_at) : new Date();
-  const yyyy = String(d.getFullYear());
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const relPath = `${yyyy}/${mm}/${hash}${ext}`;
-
-  writeFileSync(join(config.thumbDir, `${hash}.webp`), await makeThumbnail(tmp, 400));
-
-  const staged = join(config.stagingDir, hash);
-  await rename(tmp, staged);
-
-  const info = insertPhoto({
-    hash, rel_path: relPath, original_filename: filename, kind: 'image',
-    format: meta.format, width: meta.width, height: meta.height, file_size: statSync(staged).size,
-    duration: null, taken_at: meta.taken_at, camera_make: meta.camera_make, camera_model: meta.camera_model,
-    gps_lat: meta.gps_lat, gps_lon: meta.gps_lon, sync_status: 'pending', staged: 1,
-  });
-  const id = Number(info.lastInsertRowid);
-  enqueueUpload(id);
-  kickSync(); // try to push immediately if the agent is online
-
-  return sendJson(req, res, 201, { status: 'created', id });
+  if (result.rejected) return sendJson(req, res, 400, { error: 'unsupported_image' });
+  if (result.duplicate) return sendJson(req, res, 200, { status: 'duplicate', id: result.id });
+  return sendJson(req, res, 201, { status: 'created', id: result.id });
 }
 
 async function handleTagOp(req, res, op) {
@@ -321,18 +236,6 @@ function isHttps(req) {
   return req.headers['x-forwarded-proto'] === 'https';
 }
 
-async function handleIngest(req, res) {
-  const body = await readJson(req, 16 * 1024 * 1024);
-  const photo = body?.photo;
-  const thumbB64 = body?.thumbnail_b64;
-  if (!photo?.hash || !thumbB64) return sendJson(req, res, 400, { error: 'bad_request' });
-  const existing = getByHash(photo.hash);
-  if (existing) return sendJson(req, res, 200, { status: 'duplicate', rel_path: existing.rel_path });
-  writeFileSync(join(config.thumbDir, `${photo.hash}.webp`), Buffer.from(thumbB64, 'base64'));
-  insertPhoto({ ...photo, sync_status: 'synced', staged: 0 });
-  return sendJson(req, res, 201, { status: 'created' });
-}
-
 function streamToFile(req, path, limit) {
   return new Promise((resolve, reject) => {
     let size = 0;
@@ -369,5 +272,6 @@ function sendJson(req, res, status, body) {
 server.listen(config.port, () => {
   console.log(`[oculus] listening on :${config.port}`);
   console.log(`[oculus] thumbnails: ${config.thumbDir}`);
-  startSync();
+  console.log(`[oculus] originals:  ${config.originalsDir}`);
+  startScanner();
 });

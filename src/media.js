@@ -13,8 +13,19 @@ export function hashFile(path) {
   });
 }
 
+// Decode guards (also enforced in ingest). limitInputPixels caps decompression
+// bombs; MAX_DIMENSION rejects absurdly large single edges; failOn: 'error' makes
+// sharp throw on a malformed stream (e.g. an executable renamed to .jpg).
+export const MAX_PIXELS = 24000 * 24000;
+export const MAX_DIMENSION = 24000;
+const SHARP_OPTS = { limitInputPixels: MAX_PIXELS, failOn: 'error' };
+
 export async function readImageMeta(path) {
-  const meta = await sharp(path).metadata();
+  const meta = await sharp(path, SHARP_OPTS).metadata();
+  if (!meta.format) throw new Error('unsupported_image');
+  if ((meta.width || 0) > MAX_DIMENSION || (meta.height || 0) > MAX_DIMENSION) {
+    throw new Error('image_too_large');
+  }
   let exif = {};
   try { exif = (await exifr.parse(path)) || {}; } catch { exif = {}; }
 
@@ -35,7 +46,7 @@ export async function readImageMeta(path) {
 }
 
 export async function makeThumbnail(path, maxPx) {
-  return sharp(path)
+  return sharp(path, SHARP_OPTS)
     .rotate()
     .resize(maxPx, maxPx, { fit: 'inside', withoutEnlargement: true })
     .webp({ quality: 80 })
