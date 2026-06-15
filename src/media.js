@@ -20,6 +20,12 @@ export const MAX_PIXELS = 24000 * 24000;
 export const MAX_DIMENSION = 24000;
 const SHARP_OPTS = { limitInputPixels: MAX_PIXELS, failOn: 'error' };
 
+// Local webp derivatives, both produced by makeThumbnail (resize-inside, no upscale).
+// THUMB_PX feeds the grid; PREVIEW_PX feeds the lightbox so normal viewing never
+// reaches across the Atlantic to the box for a full-size original.
+export const THUMB_PX = 400;
+export const PREVIEW_PX = 2048;
+
 export async function readImageMeta(path) {
   const meta = await sharp(path, SHARP_OPTS).metadata();
   if (!meta.format) throw new Error('unsupported_image');

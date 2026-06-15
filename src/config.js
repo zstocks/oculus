@@ -15,6 +15,8 @@ export const config = {
   port: Number(process.env.PORT) || 3000,
   dataDir: DATA_DIR,
   thumbDir: process.env.THUMB_DIR || join(DATA_DIR, 'thumbnails'),
+  // ~2048px webp previews for the lightbox; a permanent local derivative, like thumbs.
+  previewDir: process.env.PREVIEW_DIR || join(DATA_DIR, 'previews'),
   // Originals + incoming live on the Hetzner Storage Box mount; tmp stays on local disk.
   originalsDir: process.env.ORIGINALS_DIR || '/app/originals',
   incomingDir: process.env.INCOMING_DIR || '/app/incoming',

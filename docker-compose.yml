@@ -24,6 +24,7 @@ services:
       PORT: "3000"
       DB_PATH: /app/data/oculus.db
       THUMB_DIR: /app/data/thumbnails
+      PREVIEW_DIR: /app/data/previews
       ORIGINALS_DIR: /app/originals
       INCOMING_DIR: /app/incoming
       SCAN_INTERVAL_MS: ${SCAN_INTERVAL_MS:-30000}

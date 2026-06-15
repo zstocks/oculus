@@ -82,3 +82,9 @@ const origInfoStmt = db.prepare('SELECT rel_path, staged, hash, format, original
 export function getOriginalInfo(id) {
   return origInfoStmt.get(id);
 }
+
+// Every photo's hash + rel_path, for the preview backfill to walk the library.
+const allFilesStmt = db.prepare('SELECT id, hash, rel_path FROM photos ORDER BY id');
+export function listAllPhotoFiles() {
+  return allFilesStmt.all();
+}

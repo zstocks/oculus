@@ -2,7 +2,8 @@ import { mkdir, rename, copyFile, unlink, stat, writeFile } from 'node:fs/promis
 import { join, dirname, extname } from 'node:path';
 import { config } from './config.js';
 import { getByHash, insertPhoto } from './db/photos.js';
-import { hashFile, readImageMeta, makeThumbnail } from './media.js';
+import { hashFile, readImageMeta, makeThumbnail, THUMB_PX } from './media.js';
+import { generatePreview } from './preview.js';
 
 // Move a file that may cross filesystems (local tmp/incoming -> box mount).
 // rename() is atomic within one fs but throws EXDEV across devices; fall back to copy+unlink.
@@ -45,7 +46,18 @@ export async function ingestFile(srcPath, originalFilename) {
     return { rejected: true, reason: err.message || 'unsupported_image' };
   }
 
-  await writeFile(join(config.thumbDir, `${hash}.webp`), await makeThumbnail(srcPath, 400));
+  // Both local derivatives come from the same local source read, before the original
+  // is moved to the box: thumbnail for the grid, preview for the lightbox.
+  await writeFile(join(config.thumbDir, `${hash}.webp`), await makeThumbnail(srcPath, THUMB_PX));
+
+  // Preview generation is best-effort: a failure here must never abort the move of the
+  // original (unrecoverable) or the DB insert. The preview is recoverable — the route
+  // lazily regenerates it from the original on first view.
+  try {
+    await generatePreview(srcPath, hash);
+  } catch (err) {
+    console.warn(`[ingest] preview generation failed for ${hash}, will lazy-gen on first view:`, err.message);
+  }
 
   const relPath = relPathFor(meta, hash, originalFilename);
   const dest = join(config.originalsDir, relPath);

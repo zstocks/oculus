@@ -1,12 +1,12 @@
 import http from 'node:http';
-import { mkdirSync, createReadStream, createWriteStream, statSync } from 'node:fs';
+import { mkdirSync, createReadStream, createWriteStream, statSync, existsSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { config } from './config.js';
 import './db/index.js';
 import {
-  countPhotos, searchPhotos, listUntagged, getById, getOriginalInfo, renamePhoto,
+  countPhotos, searchPhotos, listUntagged, getById, getByHash, getOriginalInfo, renamePhoto,
 } from './db/photos.js';
 import { listTags, getPhotoTags, applyTags, removeTags } from './db/tags.js';
 import { parse, QueryError } from './query/parse.js';
@@ -14,15 +14,23 @@ import { compile } from './query/compile.js';
 import { serveStatic } from './static.js';
 import { formatToMime } from './media.js';
 import { ingestFile } from './ingest.js';
+import { previewPath, ensurePreview } from './preview.js';
 import { startScanner } from './scanner.js';
 import { issueToken, isLoggedIn, checkPassword, sessionCookie, clearCookie } from './session.js';
 import { tooMany, recordFail, recordSuccess } from './ratelimit.js';
 
 mkdirSync(config.thumbDir, { recursive: true });
+mkdirSync(config.previewDir, { recursive: true });
 mkdirSync(config.tmpDir, { recursive: true });
 
 const isGet = (m) => m === 'GET' || m === 'HEAD';
 const HASH_RE = /^[0-9a-f]{64}$/;
+// A photo's bytes never change under a given id/hash, so derivatives + originals are
+// immutable and revalidate cheaply via an ETag derived from the file's size + mtime.
+// `private`, not `public`: the win is the logged-in user's browser cache, which private
+// serves identically. public would additionally let a shared cache (e.g. Cloudflare in
+// proxy mode) store these behind-auth bytes and hand them to unauthenticated requests.
+const IMMUTABLE = 'private, max-age=31536000, immutable';
 // Icons must be reachable before login (login page + browsers' bare /favicon.ico probe).
 const PUBLIC_ASSETS = new Set(['/favicon.ico', '/favicon.svg', '/apple-touch-icon.png']);
 
@@ -54,6 +62,7 @@ const server = http.createServer(async (req, res) => {
     if (path === '/api/photos/count' && isGet(method)) return sendJson(req, res, 200, { count: countPhotos() });
     if (path === '/api/upload' && method === 'POST') return await handleUpload(req, res);
     if (path.startsWith('/api/thumb/') && isGet(method)) return handleThumb(req, res, path);
+    if (path.startsWith('/api/preview/') && isGet(method)) return await handlePreview(req, res, path);
     if (path.startsWith('/api/original/') && method === 'GET') return await handleOriginal(req, res, path);
     if (path.startsWith('/api/download/') && method === 'GET') return await handleDownload(req, res, path);
     if (path.startsWith('/api/photos/') && isGet(method)) return handleGetPhoto(req, res, path);
@@ -109,15 +118,58 @@ async function handleRenamePhoto(req, res, path) {
 function handleThumb(req, res, path) {
   const hash = path.slice('/api/thumb/'.length).replace(/\.webp$/, '');
   if (!HASH_RE.test(hash)) return sendJson(req, res, 400, { error: 'bad_request' });
-  const file = join(config.thumbDir, `${hash}.webp`);
+  sendLocalImage(req, res, join(config.thumbDir, `${hash}.webp`), 'image/webp');
+}
+
+// ETag basis: file size + mtime. Cheap and stable, since these files never change.
+function etagFor(st) {
+  return `"${st.size}-${Math.round(st.mtimeMs)}"`;
+}
+
+// If the client's cached copy is still current, answer 304 and skip the body.
+// Returns true when it has handled the response.
+function sendNotModified(req, res, etag) {
+  if (req.headers['if-none-match'] !== etag) return false;
+  res.writeHead(304, { ETag: etag, 'Cache-Control': IMMUTABLE });
+  res.end();
+  return true;
+}
+
+// Serve a local webp derivative (thumbnail or preview) from the persisted ./data disk.
+function sendLocalImage(req, res, file, contentType) {
   let st;
   try { st = statSync(file); } catch { return sendJson(req, res, 404, { error: 'not_found' }); }
+  const etag = etagFor(st);
+  if (sendNotModified(req, res, etag)) return;
   res.writeHead(200, {
-    'Content-Type': 'image/webp', 'Content-Length': st.size,
-    'Cache-Control': 'public, max-age=31536000, immutable',
+    'Content-Type': contentType, 'Content-Length': st.size,
+    'Cache-Control': IMMUTABLE, ETag: etag,
   });
   if (req.method === 'HEAD') return res.end();
-  createReadStream(file).pipe(res);
+  const stream = createReadStream(file);
+  stream.on('error', () => res.destroy());
+  stream.pipe(res);
+}
+
+// Lightbox preview: serve the local ~2048px webp if present. On miss, generate it
+// once from the original on the box (deduped) and serve it. If the box read itself
+// fails, degrade to the local thumbnail so a flaky link is slow, not broken.
+async function handlePreview(req, res, path) {
+  const hash = path.slice('/api/preview/'.length).replace(/\.webp$/, '');
+  if (!HASH_RE.test(hash)) return sendJson(req, res, 400, { error: 'bad_request' });
+
+  const file = previewPath(hash);
+  if (!existsSync(file)) {
+    const row = getByHash(hash);
+    if (!row || !row.rel_path) return sendJson(req, res, 404, { error: 'not_found' });
+    try {
+      await ensurePreview(hash, row.rel_path);
+    } catch (err) {
+      console.warn(`[preview] generate failed for ${hash}: ${err.message}`);
+      return sendLocalImage(req, res, join(config.thumbDir, `${hash}.webp`), 'image/webp');
+    }
+  }
+  sendLocalImage(req, res, file, 'image/webp');
 }
 
 // Stream the original straight from the box mount. Mount down -> the read errors -> 503;
@@ -128,7 +180,7 @@ async function handleOriginal(req, res, path) {
   const info = getOriginalInfo(id);
   if (!info || !info.rel_path) return sendJson(req, res, 404, { error: 'not_found' });
 
-  streamFromMount(req, res, info.rel_path, { 'Content-Type': formatToMime(info.format) });
+  streamFromMount(req, res, info.rel_path, { 'Content-Type': formatToMime(info.format) }, true);
 }
 
 // Download the original to the requesting device — same mount read, attachment headers.
@@ -141,7 +193,9 @@ async function handleDownload(req, res, path) {
   streamFromMount(req, res, info.rel_path, downloadHeaders(formatToMime(info.format), downloadName(info)));
 }
 
-function streamFromMount(req, res, relPath, headers) {
+// `cache` adds immutable caching + ETag revalidation (for the inline original view).
+// The download route leaves it off so its no-store attachment headers stand.
+function streamFromMount(req, res, relPath, headers, cache = false) {
   const file = join(config.originalsDir, relPath);
   let st;
   try {
@@ -151,7 +205,13 @@ function streamFromMount(req, res, relPath, headers) {
     if (err.code === 'ENOENT') return sendJson(req, res, 404, { error: 'not_found' });
     return sendJson(req, res, 503, { error: 'storage_unavailable' });
   }
-  res.writeHead(200, { ...headers, 'Content-Length': st.size });
+  let cacheHeaders = {};
+  if (cache) {
+    const etag = etagFor(st);
+    if (sendNotModified(req, res, etag)) return;
+    cacheHeaders = { 'Cache-Control': IMMUTABLE, ETag: etag };
+  }
+  res.writeHead(200, { ...headers, ...cacheHeaders, 'Content-Length': st.size });
   if (req.method === 'HEAD') return res.end();
   const stream = createReadStream(file);
   stream.on('error', () => res.destroy());

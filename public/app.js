@@ -161,12 +161,15 @@ async function renderDetail() {
   const offline = $('lbOffline');
   offline.hidden = true;
 
-  img.onerror = () => {                       // 503 / unreachable -> fall back to thumbnail
+  img.onerror = () => {                       // preview route unreachable -> fall back to thumbnail
     img.onerror = null;
     img.src = '/api/thumb/' + p.hash;
     offline.hidden = false;
   };
-  img.src = '/api/original/' + p.id;
+  // The lightbox shows the local ~2048px preview (instant); full resolution is an
+  // explicit Download. The preview route already degrades to the thumbnail server-side
+  // if the box is down, so onerror is only a last resort.
+  img.src = '/api/preview/' + p.hash;
 
   const date = p.taken_at ? new Date(p.taken_at).toLocaleString() : '';
   const dims = p.width && p.height ? `${p.width}\u00d7${p.height}` : '';
@@ -276,9 +279,9 @@ async function renameDetail() {
   if (tileImg) tileImg.alt = p.original_filename;
 }
 
-// Native browser download: the server sets Content-Disposition: attachment, so this
-// streams to the device's downloads without navigating away. The server pulls the
-// original from the Maingear, serves it, then deletes its temp copy on the VPS.
+// Native browser download of the full-resolution original. The server sets
+// Content-Disposition: attachment, so this streams to the device's downloads without
+// navigating away. The original is read straight from the Storage Box mount.
 function downloadDetail() {
   const p = state.photos[state.detailIndex];
   if (!p) return;
