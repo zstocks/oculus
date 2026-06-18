@@ -48,7 +48,12 @@ body.modal-open { overflow: hidden; }
 .search input:focus { outline: none; border-color: var(--accent-dim); }
 .search input::placeholder { color: #5c5953; }
 
-.views { display: flex; gap: 6px; }
+.views { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Icon-only actions (Upload, Logout): square, centered glyph, same chrome as
+   their text counterparts. title/aria-label keep them labelled for a11y. */
+.btn.icon, .chip.icon { padding: 8px; display: inline-grid; place-items: center; }
+.icon svg { width: 16px; height: 16px; display: block; }
 
 .btn {
   background: var(--accent); color: #1a1305; border: 0;
