@@ -31,6 +31,9 @@ body.modal-open { overflow: hidden; }
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
 }
+/* Left column: wordmark with the Upload/Logout actions stacked beneath it. */
+.brandcol { display: flex; flex-direction: column; gap: 8px; }
+.brandactions { display: flex; gap: 6px; }
 .brand {
   font-family: var(--mono);
   letter-spacing: 0.38em;
