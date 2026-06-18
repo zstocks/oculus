@@ -6,3 +6,4 @@ data/*.db-wal
 *.log
 CLAUDE.md
 CLAUDE_2.md
+oculus-context.md
