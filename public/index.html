@@ -21,6 +21,7 @@
     <nav class="views">
       <button id="viewAll" class="chip active" type="button">All</button>
       <button id="viewUntagged" class="chip" type="button">Untagged</button>
+      <button id="slideshowBtn" class="chip" type="button">Slideshow</button>
       <button id="selectToggle" class="chip" type="button">Select</button>
       <button id="uploadBtn" class="btn" type="button">Upload</button>
       <button id="logoutBtn" class="chip" type="button">Logout</button>
@@ -53,9 +54,27 @@
       <img id="lbImg" alt="">
       <div id="lbOffline" class="lb-offline" hidden>Preview unavailable &mdash; showing a low-res thumbnail.</div>
     </div>
+
+    <div id="lbControls" class="lb-controls">
+      <button id="ssPrev" class="ss-btn" type="button" aria-label="Previous">&#8249;</button>
+      <button id="ssPlay" class="ss-btn" type="button" aria-label="Play/Pause">&#9654;</button>
+      <button id="ssNext" class="ss-btn" type="button" aria-label="Next">&#8250;</button>
+      <span class="ss-sep"></span>
+      <div class="ss-speed" role="group" aria-label="Speed">
+        <button class="ss-btn" type="button" data-ms="10000">Slow</button>
+        <button class="ss-btn" type="button" data-ms="5000">Medium</button>
+        <button class="ss-btn" type="button" data-ms="3000">Fast</button>
+      </div>
+      <span class="ss-sep"></span>
+      <button id="ssShuffle" class="ss-btn" type="button">Shuffle</button>
+      <button id="ssRepeat" class="ss-btn" type="button">Repeat</button>
+      <span class="ss-sep"></span>
+      <button id="ssExit" class="ss-btn" type="button">Exit</button>
+    </div>
     <div class="lb-panel">
       <div id="lbMeta" class="lb-meta"></div>
       <div class="lb-actions">
+        <button id="lbPresent" class="btn ghost" type="button">Present</button>
         <button id="lbDownload" class="btn ghost" type="button">Download</button>
         <button id="lbRename" class="btn ghost" type="button">Rename</button>
       </div>

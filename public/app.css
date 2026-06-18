@@ -183,3 +183,41 @@ body.selecting .check {
 }
 .suggest:hover { color: var(--fg); border-color: var(--accent-dim); }
 .suggest:active { color: var(--accent); }
+
+/* ---- presentation / slideshow ---- */
+/* In presentation mode the lightbox fills the screen (it's also put into the
+   Fullscreen API). Chrome — info panel, close, and nav arrows — is hidden;
+   the only controls are the auto-hiding overlay bar below. */
+.lightbox.presenting { background: #000; }
+.lightbox.presenting .lb-panel,
+.lightbox.presenting .lb-close,
+.lightbox.presenting .lb-nav { display: none; }
+.lightbox.presenting .lb-stage img { max-width: 100%; max-height: 100%; }
+/* When idle, hide the cursor and the control bar so nothing obstructs the image. */
+.lightbox.presenting.idle { cursor: none; }
+
+/* The control bar lives in the DOM always but is only shown while presenting. */
+.lb-controls { display: none; }
+.lightbox.presenting .lb-controls {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  justify-content: center;
+  position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%);
+  z-index: 3; max-width: calc(100vw - 24px);
+  padding: 8px 12px; border-radius: 999px;
+  background: rgba(20,20,22,.78); border: 1px solid var(--line);
+  box-shadow: 0 10px 40px rgba(0,0,0,.6);
+  backdrop-filter: blur(10px);
+  transition: opacity .25s ease;
+}
+.lightbox.presenting.idle .lb-controls { opacity: 0; pointer-events: none; }
+
+.ss-btn {
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 7px 12px; font-size: 13px; line-height: 1; cursor: pointer;
+  font-family: var(--mono); letter-spacing: .02em;
+}
+.ss-btn:hover { color: var(--fg); border-color: var(--accent-dim); }
+.ss-btn.on { color: var(--accent); border-color: var(--accent-dim); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.ss-speed { display: flex; gap: 6px; }
+.ss-sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 2px; }
