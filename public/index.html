@@ -12,7 +12,23 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">OCULUS</div>
+    <div class="brandcol">
+      <div class="brand">OCULUS</div>
+      <div class="brandactions">
+        <button id="uploadBtn" class="btn icon" type="button" title="Upload" aria-label="Upload">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/>
+          </svg>
+        </button>
+        <button id="logoutBtn" class="chip icon" type="button" title="Logout" aria-label="Logout">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>
+          </svg>
+        </button>
+      </div>
+    </div>
     <form id="searchForm" class="search" role="search">
       <input id="searchInput" type="search" autocomplete="off" spellcheck="false"
              placeholder="beach AND (sunset OR sunrise) NOT crowded">
@@ -21,9 +37,8 @@
     <nav class="views">
       <button id="viewAll" class="chip active" type="button">All</button>
       <button id="viewUntagged" class="chip" type="button">Untagged</button>
+      <button id="slideshowBtn" class="chip" type="button">Slideshow</button>
       <button id="selectToggle" class="chip" type="button">Select</button>
-      <button id="uploadBtn" class="btn" type="button">Upload</button>
-      <button id="logoutBtn" class="chip" type="button">Logout</button>
     </nav>
   </header>
 
@@ -53,9 +68,27 @@
       <img id="lbImg" alt="">
       <div id="lbOffline" class="lb-offline" hidden>Preview unavailable &mdash; showing a low-res thumbnail.</div>
     </div>
+
+    <div id="lbControls" class="lb-controls">
+      <button id="ssPrev" class="ss-btn" type="button" aria-label="Previous">&#8249;</button>
+      <button id="ssPlay" class="ss-btn" type="button" aria-label="Play/Pause">&#9654;</button>
+      <button id="ssNext" class="ss-btn" type="button" aria-label="Next">&#8250;</button>
+      <span class="ss-sep"></span>
+      <div class="ss-speed" role="group" aria-label="Speed">
+        <button class="ss-btn" type="button" data-ms="10000">Slow</button>
+        <button class="ss-btn" type="button" data-ms="5000">Medium</button>
+        <button class="ss-btn" type="button" data-ms="3000">Fast</button>
+      </div>
+      <span class="ss-sep"></span>
+      <button id="ssShuffle" class="ss-btn" type="button">Shuffle</button>
+      <button id="ssRepeat" class="ss-btn" type="button">Repeat</button>
+      <span class="ss-sep"></span>
+      <button id="ssExit" class="ss-btn" type="button">Exit</button>
+    </div>
     <div class="lb-panel">
       <div id="lbMeta" class="lb-meta"></div>
       <div class="lb-actions">
+        <button id="lbPresent" class="btn ghost" type="button">Present</button>
         <button id="lbDownload" class="btn ghost" type="button">Download</button>
         <button id="lbRename" class="btn ghost" type="button">Rename</button>
       </div>

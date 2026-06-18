@@ -13,7 +13,21 @@ const state = {
   selected: new Set(),
   detailIndex: -1,
   detailTags: [],
+  present: false,         // presentation (fullscreen, chrome hidden) is active
+  idleTimer: null,        // hides the control bar / cursor after inactivity
+  slideshow: {
+    active: false,        // auto-advancing is running
+    playing: false,       // not paused
+    shuffle: false,
+    repeat: false,
+    intervalMs: 5000,     // 10000 slow / 5000 medium / 3000 fast
+    order: [],            // photo indices in play order (shuffled when shuffle is on)
+    pos: 0,               // current position within `order`
+    timer: null,          // pending auto-advance
+  },
 };
+
+const IDLE_MS = 2800;     // how long before controls + cursor fade in presentation mode
 
 const $ = (id) => document.getElementById(id);
 const grid = () => $('grid');
@@ -145,6 +159,7 @@ function openDetail(index) {
 }
 
 function closeDetail() {
+  exitPresentation();        // also stops any running slideshow
   $('lightbox').hidden = true;
   document.body.classList.remove('modal-open');
   $('lbImg').removeAttribute('src');
@@ -293,6 +308,192 @@ function downloadDetail() {
   a.remove();
 }
 
+// ---- presentation mode ----
+// Enters the chrome-free fullscreen view for whatever photo is currently open.
+// Requesting fullscreen must happen inside the originating user gesture, so any
+// async work (loading the rest of a slideshow set) is deferred until after this.
+function enterPresentation() {
+  if (state.present || state.detailIndex < 0) return;
+  state.present = true;
+  const lb = $('lightbox');
+  lb.classList.add('presenting');
+  if (lb.requestFullscreen) lb.requestFullscreen().catch(() => {}); // CSS still covers the viewport if denied
+  bumpControls();
+  updateControls();
+}
+
+function exitPresentation() {
+  if (!state.present) return;
+  state.present = false;
+  stopSlideshow();
+  const lb = $('lightbox');
+  lb.classList.remove('presenting', 'idle');
+  clearTimeout(state.idleTimer);
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+
+// Reveal the controls + cursor, then arm the timer that hides them again.
+function bumpControls() {
+  if (!state.present) return;
+  $('lightbox').classList.remove('idle');
+  clearTimeout(state.idleTimer);
+  state.idleTimer = setTimeout(() => {
+    if (state.present) $('lightbox').classList.add('idle');
+  }, IDLE_MS);
+}
+
+// ---- slideshow ----
+// Walk every page of the current query so shuffle/repeat span the whole filtered
+// set, not just the first loaded page. ~400 images max, so this is cheap.
+async function loadAllPhotos() {
+  while (!state.end) {
+    const before = state.photos.length;
+    await loadPhotos(false);
+    if (state.photos.length === before) break; // guard against a stuck page
+  }
+}
+
+function shuffleInPlace(a) {                       // Fisher-Yates
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+}
+
+function buildOrder() {
+  const order = Array.from({ length: state.photos.length }, (_, i) => i);
+  if (state.slideshow.shuffle) shuffleInPlace(order);
+  state.slideshow.order = order;
+}
+
+function showSlide() {
+  const ss = state.slideshow;
+  state.detailIndex = ss.order[ss.pos];
+  if ($('lightbox').hidden) {
+    $('lightbox').hidden = false;
+    document.body.classList.add('modal-open');
+  }
+  renderDetail();
+  preloadNext();
+}
+
+// Decode the next slide's preview ahead of time so transitions don't flash.
+function preloadNext() {
+  const ss = state.slideshow;
+  if (!ss.active) return;
+  let next = ss.pos + 1;
+  if (next >= ss.order.length) next = ss.repeat ? 0 : -1;
+  if (next < 0) return;
+  const p = state.photos[ss.order[next]];
+  if (p) { const im = new Image(); im.src = '/api/preview/' + p.hash; }
+}
+
+function scheduleSlide() {
+  const ss = state.slideshow;
+  clearTimeout(ss.timer);
+  if (ss.active && ss.playing) ss.timer = setTimeout(() => slideshowStep(1), ss.intervalMs);
+}
+
+function slideshowStep(delta) {
+  const ss = state.slideshow;
+  if (!ss.active || !ss.order.length) return;
+  let pos = ss.pos + delta;
+  if (pos >= ss.order.length) {
+    if (!ss.repeat) { setPlaying(false); return; }   // reached the end, not repeating -> just stop advancing
+    pos = 0;
+    if (ss.shuffle) buildOrder();                    // fresh shuffle each lap
+  } else if (pos < 0) {
+    pos = ss.repeat ? ss.order.length - 1 : 0;
+  }
+  ss.pos = pos;
+  showSlide();
+  scheduleSlide();
+}
+
+// Begin auto-advancing. `fromCurrent` continues from the open image (used by the
+// in-presentation Play button); otherwise it starts at the top of the set.
+// The synchronous prefix (everything before the await) opens the first slide, so a
+// caller can request fullscreen right after — still inside the originating gesture.
+async function beginSlideshow(fromCurrent) {
+  if (!state.photos.length) { setStatus('Nothing to play — no photos in this view.'); return; }
+  const ss = state.slideshow;
+  ss.active = true;
+  ss.playing = true;
+  buildOrder();
+  ss.pos = fromCurrent ? Math.max(0, ss.order.indexOf(state.detailIndex)) : 0;
+  showSlide();
+  scheduleSlide();
+  updateControls();
+
+  // Pull in the rest of the filtered set in the background, then widen the order
+  // to include it without disturbing the slide currently on screen.
+  if (!state.end) {
+    const current = state.detailIndex;
+    await loadAllPhotos();
+    buildOrder();
+    ss.pos = Math.max(0, ss.order.indexOf(current));
+  }
+}
+
+// Topbar entry point: play the whole current view from the start, in fullscreen.
+function startSlideshow() {
+  if (!state.photos.length) { setStatus('Nothing to play — no photos in this view.'); return; }
+  beginSlideshow(false);   // synchronous prefix opens the first slide before this returns
+  enterPresentation();     // request fullscreen while still inside the click gesture
+}
+
+// Play button inside presentation: start the show if idle, else pause/resume.
+function playPause() {
+  if (state.slideshow.active) setPlaying(!state.slideshow.playing);
+  else beginSlideshow(true);
+}
+
+function stopSlideshow() {
+  const ss = state.slideshow;
+  clearTimeout(ss.timer);
+  ss.active = false;
+  ss.playing = false;
+  updateControls();
+}
+
+function setPlaying(on) {
+  state.slideshow.playing = on;
+  if (on) scheduleSlide(); else clearTimeout(state.slideshow.timer);
+  updateControls();
+}
+
+function setSpeed(ms) {
+  state.slideshow.intervalMs = ms;
+  if (state.slideshow.playing) scheduleSlide();   // restart the countdown at the new rate
+  updateControls();
+}
+
+function toggleShuffle() {
+  const ss = state.slideshow;
+  ss.shuffle = !ss.shuffle;
+  const current = state.detailIndex;
+  buildOrder();
+  ss.pos = Math.max(0, ss.order.indexOf(current));  // keep the current image in place
+  scheduleSlide();
+  updateControls();
+}
+
+function toggleRepeat() {
+  state.slideshow.repeat = !state.slideshow.repeat;
+  updateControls();
+}
+
+// Reflect slideshow state on the overlay control bar.
+function updateControls() {
+  const ss = state.slideshow;
+  $('ssPlay').innerHTML = ss.playing ? '&#10074;&#10074;' : '&#9654;';
+  $('ssShuffle').classList.toggle('on', ss.shuffle);
+  $('ssRepeat').classList.toggle('on', ss.repeat);
+  for (const b of document.querySelectorAll('.ss-speed .ss-btn')) {
+    b.classList.toggle('on', Number(b.dataset.ms) === ss.intervalMs);
+  }
+}
+
 // ---- view switching ----
 function setMode(mode) {
   state.mode = mode;
@@ -359,18 +560,43 @@ function init() {
   $('lbClose').addEventListener('click', closeDetail);
   $('lbRename').addEventListener('click', renameDetail);
   $('lbDownload').addEventListener('click', downloadDetail);
+  $('lbPresent').addEventListener('click', enterPresentation);
   $('lbPrev').addEventListener('click', () => step(-1));
   $('lbNext').addEventListener('click', () => step(1));
-  $('lightbox').addEventListener('click', (e) => { if (e.target === $('lightbox') || e.target.classList.contains('lb-stage')) closeDetail(); });
+
+  // slideshow + presentation controls
+  $('slideshowBtn').addEventListener('click', startSlideshow);
+  $('ssPlay').addEventListener('click', playPause);
+  $('ssPrev').addEventListener('click', () => (state.slideshow.active ? slideshowStep(-1) : step(-1)));
+  $('ssNext').addEventListener('click', () => (state.slideshow.active ? slideshowStep(1) : step(1)));
+  $('ssShuffle').addEventListener('click', toggleShuffle);
+  $('ssRepeat').addEventListener('click', toggleRepeat);
+  $('ssExit').addEventListener('click', exitPresentation);
+  for (const b of document.querySelectorAll('.ss-speed .ss-btn')) {
+    b.addEventListener('click', () => setSpeed(Number(b.dataset.ms)));
+  }
+  $('lightbox').addEventListener('pointermove', bumpControls);
+  $('lightbox').addEventListener('touchstart', bumpControls, { passive: true });
+  // Browser/ESC-driven fullscreen exit -> leave presentation cleanly (no double exitFullscreen).
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && state.present) exitPresentation();
+  });
+  $('lightbox').addEventListener('click', (e) => {
+    if (state.present) return;   // in presentation, the background is the show — only the controls act
+    if (e.target === $('lightbox') || e.target.classList.contains('lb-stage')) closeDetail();
+  });
   $('lbAddTag').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); detailAddTags(state.photos[state.detailIndex].id); }
   });
   $('lbAddTag').addEventListener('input', renderSuggest);
   document.addEventListener('keydown', (e) => {
     if ($('lightbox').hidden) return;
-    if (e.key === 'Escape') closeDetail();
-    else if (e.key === 'ArrowLeft') step(-1);
-    else if (e.key === 'ArrowRight') step(1);
+    const nav = (delta) => { if (state.slideshow.active) slideshowStep(delta); else step(delta); };
+    if (e.key === 'Escape') { if (state.present) exitPresentation(); else closeDetail(); }
+    else if (e.key === 'ArrowLeft') nav(-1);
+    else if (e.key === 'ArrowRight') nav(1);
+    else if (e.key === ' ' && state.present) { e.preventDefault(); playPause(); }
+    else if (e.key === 'f' || e.key === 'F') { if (state.present) exitPresentation(); else enterPresentation(); }
   });
 
   loadTags();
