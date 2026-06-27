@@ -591,6 +591,9 @@ function init() {
   $('lbAddTag').addEventListener('input', renderSuggest);
   document.addEventListener('keydown', (e) => {
     if ($('lightbox').hidden) return;
+    // Don't hijack keystrokes while typing in a field (e.g. the add-tag box).
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     const nav = (delta) => { if (state.slideshow.active) slideshowStep(delta); else step(delta); };
     if (e.key === 'Escape') { if (state.present) exitPresentation(); else closeDetail(); }
     else if (e.key === 'ArrowLeft') nav(-1);
