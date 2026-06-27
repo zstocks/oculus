@@ -11,6 +11,7 @@ const state = {
   tags: [],
   selectMode: false,
   selected: new Set(),
+  view: 'medium',     // grid density / list view: large | medium | small | tiny | list
   detailIndex: -1,
   detailTags: [],
   builder: { open: false, tokens: [] },  // visual query builder: flat token chain
@@ -107,6 +108,20 @@ function makeTile(p) {
   const check = document.createElement('span');
   check.className = 'check';
   tile.appendChild(check);
+
+  // Caption used only by list view (hidden via CSS in the grid views).
+  const meta = document.createElement('span');
+  meta.className = 'tile-meta';
+  const name = document.createElement('span');
+  name.className = 'tile-name';
+  name.textContent = p.original_filename || '(untitled)';
+  const sub = document.createElement('span');
+  sub.className = 'tile-sub';
+  const date = p.taken_at ? new Date(p.taken_at).toLocaleDateString() : '';
+  const dims = p.width && p.height ? `${p.width}×${p.height}` : '';
+  sub.textContent = [date, dims].filter(Boolean).join('  ·  ');
+  meta.append(name, sub);
+  tile.appendChild(meta);
 
   tile.addEventListener('click', () => {
     if (state.selectMode) toggleSelect(p.id);
@@ -496,6 +511,19 @@ function updateControls() {
   }
 }
 
+// ---- grid view (density / list) ----
+const GRID_VIEWS = ['large', 'medium', 'small', 'tiny', 'list'];
+const DEFAULT_VIEW = 'medium';
+const VIEW_KEY = 'oculus.view';
+
+function applyView(view) {
+  if (!GRID_VIEWS.includes(view)) view = DEFAULT_VIEW;
+  state.view = view;
+  grid().dataset.view = view;
+  if ($('viewSelect').value !== view) $('viewSelect').value = view;
+  try { localStorage.setItem(VIEW_KEY, view); } catch { /* private mode / storage off */ }
+}
+
 // ---- view switching ----
 function setMode(mode) {
   state.mode = mode;
@@ -740,6 +768,11 @@ function init() {
     else if (e.key === ' ' && state.present) { e.preventDefault(); playPause(); }
     else if (e.key === 'f' || e.key === 'F') { if (state.present) exitPresentation(); else enterPresentation(); }
   });
+
+  let savedView;
+  try { savedView = localStorage.getItem(VIEW_KEY); } catch { /* storage off */ }
+  applyView(savedView || DEFAULT_VIEW);
+  $('viewSelect').addEventListener('change', () => applyView($('viewSelect').value));
 
   loadTags();
   loadPhotos(true);

@@ -50,6 +50,12 @@ body.modal-open { overflow: hidden; }
 }
 .search input:focus { outline: none; border-color: var(--accent-dim); }
 .search input::placeholder { color: #5c5953; }
+.viewselect {
+  background: var(--bg-2); color: var(--fg);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 9px 12px; font-size: 13px; font-family: var(--mono); cursor: pointer;
+}
+.viewselect:focus { outline: none; border-color: var(--accent-dim); }
 
 .views { display: flex; flex-wrap: wrap; gap: 6px; }
 
@@ -130,20 +136,38 @@ body.modal-open { overflow: hidden; }
 main { padding: 16px; }
 .status { color: var(--muted); font-family: var(--mono); font-size: 13px; padding: 6px 2px; min-height: 20px; }
 
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 6px;
-}
+/* Grid density is driven by data-view on the container; switching views is just an
+   attribute swap (no re-render). `list` flips the same tiles into rows. */
+.grid { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.grid[data-view="large"]  { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.grid[data-view="medium"] { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.grid[data-view="small"]  { grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 4px; }
+.grid[data-view="tiny"]   { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 4px; }
 @media (max-width: 520px) {
-  .grid { grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 4px; }
+  .grid[data-view="large"]  { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  .grid[data-view="medium"] { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+  .grid[data-view="small"]  { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 4px; }
+  .grid[data-view="tiny"]   { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 4px; }
 }
+
+/* List view: one tile per row — fixed thumbnail + filename/date/dimensions caption. */
+.grid[data-view="list"] { display: flex; flex-direction: column; gap: 4px; }
+.grid[data-view="list"] .tile {
+  aspect-ratio: auto; width: 100%; height: 56px;
+  display: flex; align-items: center; gap: 12px; text-align: left;
+}
+.grid[data-view="list"] .tile img { width: 56px; height: 56px; flex: 0 0 56px; }
+.grid[data-view="list"] .tile-meta { display: flex; flex: 1; min-width: 0; }
 
 .tile {
   position: relative; padding: 0; border: 0; cursor: pointer;
   aspect-ratio: 1 / 1; background: var(--bg-2);
   border-radius: var(--radius); overflow: hidden;
 }
+/* Caption lives in every tile but only shows in list view. */
+.tile-meta { display: none; flex-direction: column; gap: 2px; min-width: 0; padding-right: 12px; }
+.tile-name { font-size: 13px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile-sub { font-size: 11px; color: var(--muted); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile img {
   width: 100%; height: 100%; object-fit: cover; display: block;
   opacity: 0; transition: opacity .35s ease;
