@@ -13,6 +13,7 @@ const state = {
   selected: new Set(),
   detailIndex: -1,
   detailTags: [],
+  builder: { open: false, tokens: [] },  // visual query builder: flat token chain
   present: false,         // presentation (fullscreen, chrome hidden) is active
   idleTimer: null,        // hides the control bar / cursor after inactivity
   slideshow: {
@@ -52,6 +53,7 @@ async function loadTags() {
     o.value = name;
     dl.appendChild(o);
   }
+  if (state.builder.open) renderQbPalette();
 }
 
 // ---- listing / search ----
@@ -509,6 +511,127 @@ function setSelectMode(on) {
   if (!on) clearSelection(); else updateSelbar();
 }
 
+// ---- query builder ----
+// A flat chain of tokens — tags, binary operators (AND/OR), the prefix operator
+// NOT, and parens — that compiles to a query string the existing parser understands.
+// One-way: Run writes the string into the search box and runs it; the builder never
+// reads the box back in.
+const QB_RESERVED = new Set(['AND', 'OR', 'NOT']);
+const QB_SPECIAL = ' \t\n\r()"*';   // chars in a tag name that force quoting (exact match)
+
+function qbTokenToStr(tok) {
+  if (tok.kind === 'op') return tok.op;
+  if (tok.kind === 'lparen') return '(';
+  if (tok.kind === 'rparen') return ')';
+  const name = tok.name;
+  const needsQuote = QB_RESERVED.has(name.toUpperCase()) || [...name].some((ch) => QB_SPECIAL.includes(ch));
+  return needsQuote ? `"${name}"` : name;   // quoting also pins it to an exact match
+}
+
+const qbQueryString = () => state.builder.tokens.map(qbTokenToStr).join(' ');
+
+// Structural sanity so Run can't fire an obviously malformed query. Deeper errors
+// (which the parser would reject) fall through to the server's 400 + status message.
+function qbValid() {
+  const t = state.builder.tokens;
+  if (!t.length) return true;            // empty == match everything
+  let depth = 0;
+  let prevValue = false;                 // did the previous token complete a value (tag / `)`)?
+  for (const tok of t) {
+    if (tok.kind === 'tag') { prevValue = true; }
+    else if (tok.kind === 'lparen') { depth++; prevValue = false; }
+    else if (tok.kind === 'rparen') {
+      if (!prevValue) return false;      // empty group or dangling operator before `)`
+      if (--depth < 0) return false;
+      prevValue = true;
+    }
+    else if (tok.op === 'NOT') { prevValue = false; }   // prefix: valid wherever a value can start
+    else { if (!prevValue) return false; prevValue = false; }   // binary op must follow a value
+  }
+  return depth === 0 && prevValue;       // balanced, and ends on a complete value
+}
+
+function qbAddTag(name) {
+  state.builder.tokens.push({ kind: 'tag', name });
+  renderBuilder();
+}
+
+function qbAddOp(op) {
+  const toks = state.builder.tokens;
+  const last = toks[toks.length - 1];
+  // Tapping a binary operator when one already trails just swaps it (no AND OR stacking).
+  if (last && last.kind === 'op' && last.op !== 'NOT' && op !== 'NOT') last.op = op;
+  else toks.push({ kind: 'op', op });
+  renderBuilder();
+}
+
+function qbAddParen(p) {
+  state.builder.tokens.push(p === '(' ? { kind: 'lparen' } : { kind: 'rparen' });
+  renderBuilder();
+}
+
+function renderBuilder() {
+  const chain = $('qbChain');
+  chain.innerHTML = '';
+  const toks = state.builder.tokens;
+  if (!toks.length) {
+    const ph = document.createElement('span');
+    ph.className = 'placeholder';
+    ph.textContent = 'Tap tags below and operators to build a query…';
+    chain.appendChild(ph);
+  } else {
+    toks.forEach((tok, i) => {
+      const el = document.createElement('span');
+      el.className = 'qb-token ' + (tok.kind === 'tag' ? 'tag' : tok.kind === 'op' ? 'op' : 'paren');
+      const label = document.createElement('span');
+      label.textContent = tok.kind === 'tag' ? tok.name : qbTokenToStr(tok);
+      const x = document.createElement('button');
+      x.type = 'button'; x.className = 'x'; x.textContent = '✕';
+      x.addEventListener('click', () => { toks.splice(i, 1); renderBuilder(); });
+      el.append(label, x);
+      chain.appendChild(el);
+    });
+  }
+  $('qbPreview').textContent = qbQueryString() || ' ';
+  $('qbRun').disabled = !qbValid();
+}
+
+// Tappable tag palette, filtered by what's typed. Tags aren't deduped against the
+// chain — a tag can legitimately appear more than once (e.g. inside different groups).
+function renderQbPalette() {
+  const box = $('qbTags');
+  if (!box) return;
+  box.innerHTML = '';
+  const typed = $('qbFilter').value.trim().toLowerCase();
+  const matches = state.tags.filter((name) => !typed || name.toLowerCase().includes(typed)).slice(0, 100);
+  for (const name of matches) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'suggest';
+    b.textContent = name;
+    b.addEventListener('click', () => qbAddTag(name));
+    box.appendChild(b);
+  }
+}
+
+function toggleBuilder(force) {
+  const open = typeof force === 'boolean' ? force : !state.builder.open;
+  state.builder.open = open;
+  $('builder').hidden = !open;
+  $('builderToggle').classList.toggle('active', open);
+  $('builderToggle').setAttribute('aria-expanded', String(open));
+  if (open) { renderBuilder(); renderQbPalette(); $('qbFilter').focus(); }
+}
+
+function qbRun() {
+  if (!qbValid()) return;
+  const q = qbQueryString();
+  $('searchInput').value = q;
+  state.query = q;
+  toggleBuilder(false);
+  setMode('all');
+}
+
 // ---- upload ----
 async function uploadFiles(files) {
   const list = [...files];
@@ -544,6 +667,22 @@ function init() {
   $('viewAll').addEventListener('click', () => { $('searchInput').value = ''; state.query = ''; setMode('all'); });
   $('viewUntagged').addEventListener('click', () => setMode('untagged'));
   $('selectToggle').addEventListener('click', () => setSelectMode(!state.selectMode));
+
+  // query builder
+  $('builderToggle').addEventListener('click', () => toggleBuilder());
+  $('qbRun').addEventListener('click', qbRun);
+  $('qbBack').addEventListener('click', () => { state.builder.tokens.pop(); renderBuilder(); });
+  $('qbClear').addEventListener('click', () => { state.builder.tokens = []; renderBuilder(); });
+  for (const b of document.querySelectorAll('.qb-opbtn')) {
+    b.addEventListener('click', () => (b.dataset.op ? qbAddOp(b.dataset.op) : qbAddParen(b.dataset.paren)));
+  }
+  $('qbFilter').addEventListener('input', renderQbPalette);
+  $('qbFilter').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const first = $('qbTags').querySelector('.suggest');   // Enter adds the top match
+    if (first) { qbAddTag(first.textContent); $('qbFilter').value = ''; renderQbPalette(); }
+  });
   $('loadMore').addEventListener('click', () => loadPhotos(false));
   $('uploadBtn').addEventListener('click', () => $('fileInput').click());
   $('logoutBtn').addEventListener('click', async () => {

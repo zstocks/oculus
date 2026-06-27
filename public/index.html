@@ -33,6 +33,7 @@
       <input id="searchInput" type="search" autocomplete="off" spellcheck="false"
              placeholder="beach AND (sunset OR sunrise) NOT crowded">
       <button type="submit" class="btn">Search</button>
+      <button id="builderToggle" class="btn ghost" type="button" aria-expanded="false">Build</button>
     </form>
     <nav class="views">
       <button id="viewAll" class="chip active" type="button">All</button>
@@ -41,6 +42,27 @@
       <button id="selectToggle" class="chip" type="button">Select</button>
     </nav>
   </header>
+
+  <section id="builder" class="builder" hidden aria-label="Query builder">
+    <div id="qbChain" class="qb-chain"></div>
+    <div id="qbPreview" class="qb-preview"></div>
+    <div class="qb-ops">
+      <button class="btn ghost qb-opbtn" type="button" data-op="AND">AND</button>
+      <button class="btn ghost qb-opbtn" type="button" data-op="OR">OR</button>
+      <button class="btn ghost qb-opbtn" type="button" data-op="NOT">NOT</button>
+      <button class="btn ghost qb-opbtn" type="button" data-paren="(">(</button>
+      <button class="btn ghost qb-opbtn" type="button" data-paren=")">)</button>
+      <button id="qbBack" class="btn ghost" type="button" aria-label="Remove last">&#9003;</button>
+      <button id="qbClear" class="btn ghost" type="button">Clear</button>
+      <span class="qb-sep"></span>
+      <button id="qbRun" class="btn" type="button">Run query</button>
+    </div>
+    <div class="qb-palette">
+      <input id="qbFilter" class="qb-filter" type="text" autocomplete="off" spellcheck="false"
+             placeholder="filter tags&hellip;">
+      <div id="qbTags" class="qb-tags"></div>
+    </div>
+  </section>
 
   <datalist id="tagList"></datalist>
   <input id="fileInput" type="file" multiple hidden>

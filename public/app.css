@@ -53,6 +53,53 @@ body.modal-open { overflow: hidden; }
 
 .views { display: flex; flex-wrap: wrap; gap: 6px; }
 
+/* On narrow screens the search input takes a full row and its buttons
+   (Search, Build) wrap directly beneath it, left-aligned, above the views nav. */
+@media (max-width: 520px) {
+  .search { flex-basis: 100%; flex-wrap: wrap; }
+  .search input { flex: 1 1 100%; }
+}
+
+/* ---- query builder ---- */
+.builder[hidden] { display: none !important; }
+.builder {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 16px;
+  background: var(--bg-2); border-bottom: 1px solid var(--line);
+}
+/* The assembled token chain. */
+.qb-chain {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  min-height: 36px; padding: 6px;
+  border: 1px dashed var(--line); border-radius: var(--radius);
+}
+.qb-chain .placeholder { color: var(--muted); font-family: var(--mono); font-size: 13px; padding: 2px 4px; }
+.qb-token {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 999px;
+  padding: 4px 4px 4px 12px; font-size: 13px;
+}
+.qb-token.op { font-family: var(--mono); color: var(--accent); letter-spacing: 0.04em; }
+.qb-token.paren { font-family: var(--mono); color: var(--muted); }
+.qb-token .x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 11px; padding: 2px 4px; }
+.qb-token .x:hover { color: var(--accent); }
+/* Live preview of the query string that Run will execute. */
+.qb-preview {
+  font-family: var(--mono); font-size: 12px; color: var(--muted);
+  white-space: pre-wrap; word-break: break-word; min-height: 16px; padding: 0 2px;
+}
+.qb-ops { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.qb-opbtn { font-family: var(--mono); letter-spacing: 0.02em; }
+.qb-sep { flex: 1; }   /* push Run to the right edge */
+.qb-palette { display: flex; flex-direction: column; gap: 8px; }
+.qb-filter {
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 8px 12px; font-size: 13px; width: 100%; max-width: 320px; font-family: var(--mono);
+}
+.qb-filter:focus { outline: none; border-color: var(--accent-dim); }
+.qb-tags { display: flex; flex-wrap: wrap; gap: 6px; max-height: 168px; overflow-y: auto; }
+
 /* Icon-only actions (Upload, Logout): square, centered glyph, same chrome as
    their text counterparts. title/aria-label keep them labelled for a11y. */
 .btn.icon, .chip.icon { padding: 8px; display: inline-grid; place-items: center; }
@@ -64,8 +111,11 @@ body.modal-open { overflow: hidden; }
   font-size: 13px; font-weight: 600; cursor: pointer;
 }
 .btn:hover { filter: brightness(1.08); }
+.btn:disabled { opacity: 0.45; cursor: default; filter: none; }
 .btn.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
 .btn.ghost:hover { color: var(--fg); }
+/* Build toggle, lit when the builder panel is open (mirrors the primary Search button). */
+#builderToggle.active { background: var(--accent); color: #1a1305; border-color: var(--accent); }
 
 .chip {
   background: transparent; color: var(--muted);
